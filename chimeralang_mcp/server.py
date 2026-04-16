@@ -1040,7 +1040,9 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
 # ── entrypoint ────────────────────────────────────────────────────────────
 
-async def main() -> None:
+
+# Async entrypoint (internal)
+async def _async_main() -> None:
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,
@@ -1049,4 +1051,7 @@ async def main() -> None:
         )
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import asyncio
+    def main():
+        asyncio.run(_async_main())
+    main()
