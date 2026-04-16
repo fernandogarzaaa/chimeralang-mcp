@@ -1,18 +1,18 @@
-"""ChimeraLang MCP Server — full implementation.
+﻿"""ChimeraLang MCP Server â€” full implementation.
 
 Tools exposed to Claude:
   chimera_run          Execute a .chimera program string
   chimera_confident    Enforce >= 0.95 confidence threshold on a value
   chimera_explore      Wrap a value as exploratory (hallucination permitted)
   chimera_gate         Collapse multiple candidates via quantum consensus
-  chimera_detect       Hallucination detection — 5 strategies
+  chimera_detect       Hallucination detection â€” 5 strategies
   chimera_constrain    Full constraint middleware on any tool result
   chimera_typecheck    Static type-check a .chimera program
   chimera_prove        Execute + generate Merkle-chain integrity proof
   chimera_audit        Session call-log summary
   chimera_compress     Proportional message-history compression to a token budget
   chimera_optimize     Aggressive text extraction (structural + entity + frequency)
-  chimera_fracture     Full pipeline — optimize docs + compress messages + quality gate
+  chimera_fracture     Full pipeline â€” optimize docs + compress messages + quality gate
 """
 from __future__ import annotations
 
@@ -40,13 +40,13 @@ from chimera.integrity import IntegrityEngine
 from chimera.types import ConfidenceViolation
 from chimera.claude_adapter import ClaudeConstraintMiddleware, ToolCallSpec
 
-# ── session-scoped singletons ─────────────────────────────────────────────
+# â”€â”€ session-scoped singletons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _middleware = ClaudeConstraintMiddleware(confidence_threshold=0.7)
 _detector   = HallucinationDetector()
 server      = Server("chimeralang-mcp")
 
 
-# ── helpers ───────────────────────────────────────────────────────────────
+# â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _ok(data: Any) -> CallToolResult:
     return CallToolResult(
@@ -91,7 +91,7 @@ def _run(source: str) -> dict[str, Any]:
     }
 
 
-# ── token fracture / compression helpers ──────────────────────────────────
+# â”€â”€ token fracture / compression helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Ported directly from OpenChimera (core/token_fracture.py and
 # skills/token-optimizer/optimizer.py). Bundled here so this package has
 # no runtime dependency on OpenChimera.
@@ -162,7 +162,7 @@ def _optimize_text(text: str, target_ratio: float = 0.02) -> str:
         re.MULTILINE,
     )
 
-    # 2. Key entities — capitalized words & CONSTANTS
+    # 2. Key entities â€” capitalized words & CONSTANTS
     entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]+\b|\b[A-Z_]{3,}\b', text)
 
     # 3. High-frequency nouns > 5 chars (excluding stopwords)
@@ -209,7 +209,7 @@ def _optimize_text(text: str, target_ratio: float = 0.02) -> str:
     )
 
 
-# ── tool registry ─────────────────────────────────────────────────────────
+# â”€â”€ tool registry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @server.list_tools()
 async def list_tools() -> list[Tool]:
@@ -244,7 +244,7 @@ async def list_tools() -> list[Tool]:
                     "value":      {"description": "The value to assert confidence on"},
                     "confidence": {
                         "type": "number",
-                        "description": "Confidence score 0.0–1.0. Must be >= 0.95 to pass.",
+                        "description": "Confidence score 0.0â€“1.0. Must be >= 0.95 to pass.",
                         "minimum": 0.0, "maximum": 1.0,
                     },
                     "label": {
@@ -258,7 +258,7 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="chimera_explore",
             description=(
-                "Wrap a value as Explore<> — explicitly marking it as exploratory where "
+                "Wrap a value as Explore<> â€” explicitly marking it as exploratory where "
                 "hallucination is permitted and expected. "
                 "Use for hypotheses, creative outputs, brainstorms, and anything that "
                 "must not be treated as verified fact."
@@ -269,7 +269,7 @@ async def list_tools() -> list[Tool]:
                     "value":      {"description": "The exploratory value"},
                     "confidence": {
                         "type": "number",
-                        "description": "Confidence 0.0–1.0 (typically low for explore values)",
+                        "description": "Confidence 0.0â€“1.0 (typically low for explore values)",
                         "minimum": 0.0, "maximum": 1.0, "default": 0.5,
                     },
                     "label": {"type": "string", "description": "Optional label"},
@@ -282,7 +282,7 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Collapse multiple candidate values into a single consensus result using "
                 "ChimeraLang's quantum consensus gate. "
-                "Detects and flags trivial consensus (all branches identical — no real agreement). "
+                "Detects and flags trivial consensus (all branches identical â€” no real agreement). "
                 "Strategies: majority, weighted_vote, highest_confidence. "
                 "Use when reconciling multiple model outputs, tool results, or reasoning branches."
             ),
@@ -320,12 +320,12 @@ async def list_tools() -> list[Tool]:
             name="chimera_detect",
             description=(
                 "Run ChimeraLang hallucination detection on a value. Five strategies:\n"
-                "  range            — numeric value must fall within [min, max]\n"
-                "  dictionary       — value must be in an allowed set\n"
-                "  semantic         — forbidden patterns / absolute-certainty markers\n"
-                "  cross_reference  — value must not deviate from a reference set\n"
-                "  temporal         — value timestamp must not be stale\n"
-                "  confidence_threshold — confidence must be >= threshold\n"
+                "  range            â€” numeric value must fall within [min, max]\n"
+                "  dictionary       â€” value must be in an allowed set\n"
+                "  semantic         â€” forbidden patterns / absolute-certainty markers\n"
+                "  cross_reference  â€” value must not deviate from a reference set\n"
+                "  temporal         â€” value timestamp must not be stale\n"
+                "  confidence_threshold â€” confidence must be >= threshold\n"
                 "Returns flags with severity scores and evidence."
             ),
             inputSchema={
@@ -359,8 +359,8 @@ async def list_tools() -> list[Tool]:
             name="chimera_constrain",
             description=(
                 "Apply ChimeraLang's full constraint middleware to any tool result. "
-                "Pipeline: confidence gate → must-constraint checks → "
-                "forbidden capability logging → hallucination detection → ephemeral scope cleanup. "
+                "Pipeline: confidence gate â†’ must-constraint checks â†’ "
+                "forbidden capability logging â†’ hallucination detection â†’ ephemeral scope cleanup. "
                 "Returns pass/fail with violations, warnings, confidence, and audit trace. "
                 "Primary integration point for wrapping Claude's own tool calls."
             ),
@@ -397,7 +397,7 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Statically type-check a ChimeraLang program without executing it. "
                 "Validates confidence boundaries, memory scope rules, and illegal "
-                "Explore→Confident promotions outside a gate. "
+                "Exploreâ†’Confident promotions outside a gate. "
                 "Returns errors and warnings."
             ),
             inputSchema={
@@ -412,7 +412,7 @@ async def list_tools() -> list[Tool]:
             name="chimera_prove",
             description=(
                 "Execute a ChimeraLang program and generate a Merkle-chain integrity proof. "
-                "Every reasoning step is SHA-256 hashed and chained — tamper-evident derivation. "
+                "Every reasoning step is SHA-256 hashed and chained â€” tamper-evident derivation. "
                 "Returns execution results + proof with root hash, chain length, verdict, "
                 "gate certificates, and hallucination scan summary."
             ),
@@ -559,17 +559,17 @@ async def list_tools() -> list[Tool]:
     ]
 
 
-# ── tool handlers ─────────────────────────────────────────────────────────
+# â”€â”€ tool handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
     try:
 
-        # ── chimera_run ───────────────────────────────────────────────────
+        # â”€â”€ chimera_run â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if name == "chimera_run":
             return _ok(_run(arguments["source"]))
 
-        # ── chimera_confident ─────────────────────────────────────────────
+        # â”€â”€ chimera_confident â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         elif name == "chimera_confident":
             value      = arguments["value"]
             confidence = float(arguments["confidence"])
@@ -595,7 +595,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "trace":      [f"confident({label})", f"score={confidence:.4f}"],
             })
 
-        # ── chimera_explore ───────────────────────────────────────────────
+        # â”€â”€ chimera_explore â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         elif name == "chimera_explore":
             value      = arguments["value"]
             confidence = min(max(float(arguments.get("confidence", 0.5)), 0.0), 1.0)
@@ -613,7 +613,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "trace": [f"explore({label})", f"score={confidence:.4f}"],
             })
 
-        # ── chimera_gate ──────────────────────────────────────────────────
+        # â”€â”€ chimera_gate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         elif name == "chimera_gate":
             candidates = arguments["candidates"]
             strategy   = arguments.get("strategy", "weighted_vote")
@@ -669,18 +669,18 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             }
             if trivial:
                 result["warning"] = (
-                    "All branches returned identical values — trivial consensus. "
+                    "All branches returned identical values â€” trivial consensus. "
                     "No genuine divergence detected. Use independent reasoning paths "
                     "for real consensus signal."
                 )
             if not passed:
                 result["warning"] = (
                     f"Consensus confidence {consensus_conf:.3f} below threshold {threshold}. "
-                    "Result is unreliable — consider more branches or lower threshold."
+                    "Result is unreliable â€” consider more branches or lower threshold."
                 )
             return _ok(result)
 
-        # ── chimera_detect ────────────────────────────────────────────────
+        # â”€â”€ chimera_detect â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         elif name == "chimera_detect":
             value      = arguments["value"]
             confidence = float(arguments.get("confidence", 0.8))
@@ -790,7 +790,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     flags.append({
                         "kind":        "TEMPORAL_SKIP",
                         "severity":    0.0,
-                        "description": "Not a timestamp — temporal check skipped",
+                        "description": "Not a timestamp â€” temporal check skipped",
                     })
 
             elif strategy == "confidence_threshold":
@@ -813,7 +813,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "flags":      flags,
             })
 
-        # ── chimera_constrain ─────────────────────────────────────────────
+        # â”€â”€ chimera_constrain â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         elif name == "chimera_constrain":
             spec = ToolCallSpec(
                 tool_name        = arguments["tool_name"],
@@ -847,7 +847,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 },
             })
 
-        # ── chimera_typecheck ─────────────────────────────────────────────
+        # â”€â”€ chimera_typecheck â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         elif name == "chimera_typecheck":
             source  = arguments["source"]
             tokens  = Lexer(source).tokenize()
@@ -861,7 +861,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "warnings":      result.warnings,
             })
 
-        # ── chimera_prove ─────────────────────────────────────────────────
+        # â”€â”€ chimera_prove â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         elif name == "chimera_prove":
             source  = arguments["source"]
             tokens  = Lexer(source).tokenize()
@@ -899,12 +899,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     "gate_certificates":    proof["gates"],
                     "note": (
                         f"Merkle chain of {proof['chain']['length']} steps. "
-                        "Every reasoning step SHA-256 hashed and chained — tamper-evident."
+                        "Every reasoning step SHA-256 hashed and chained â€” tamper-evident."
                     ),
                 },
             })
 
-        # ── chimera_audit ─────────────────────────────────────────────────
+        # â”€â”€ chimera_audit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         elif name == "chimera_audit":
             summary = _middleware.audit_summary()
             log     = _middleware.call_log()
@@ -922,7 +922,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 ],
             })
 
-        # ── chimera_compress ──────────────────────────────────────────────
+        # â”€â”€ chimera_compress â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         elif name == "chimera_compress":
             messages   = arguments.get("messages") or []
             query      = str(arguments.get("query", ""))
@@ -940,7 +940,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 },
             })
 
-        # ── chimera_optimize ──────────────────────────────────────────────
+        # â”€â”€ chimera_optimize â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         elif name == "chimera_optimize":
             text         = str(arguments.get("text", ""))
             target_ratio = float(arguments.get("target_ratio", 0.02))
@@ -959,7 +959,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "target_ratio":      target_ratio,
             })
 
-        # ── chimera_fracture ──────────────────────────────────────────────
+        # â”€â”€ chimera_fracture â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         elif name == "chimera_fracture":
             messages       = arguments.get("messages") or []
             documents      = arguments.get("documents") or []
@@ -1006,7 +1006,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     "kind":        "EXCESSIVE_COMPRESSION",
                     "severity":    round(1.0 - compression_ratio, 3),
                     "description": (
-                        f"Retained only {compression_ratio:.1%} of original signal — "
+                        f"Retained only {compression_ratio:.1%} of original signal â€” "
                         "output may be too degraded to be useful."
                     ),
                 })
@@ -1038,7 +1038,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         return _err(f"{type(e).__name__}: {e}")
 
 
-# ── entrypoint ────────────────────────────────────────────────────────────
+# â”€â”€ entrypoint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 # Async entrypoint (internal)
@@ -1050,8 +1050,9 @@ async def _async_main() -> None:
             server.create_initialization_options(),
         )
 
+def main() -> None:
+    asyncio.run(_async_main())
+
+
 if __name__ == "__main__":
-    import asyncio
-    def main():
-        asyncio.run(_async_main())
     main()
