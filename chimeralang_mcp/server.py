@@ -10,13 +10,18 @@ Tools exposed to Claude:
   chimera_typecheck    Static type-check a .chimera program
   chimera_prove        Execute + generate Merkle-chain integrity proof
   chimera_audit        Session call-log summary
+  chimera_compress     Proportional message-history compression to a token budget
+  chimera_optimize     Aggressive text extraction (structural + entity + frequency)
+  chimera_fracture     Full pipeline — optimize docs + compress messages + quality gate
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +89,124 @@ def _run(source: str) -> dict[str, Any]:
         ],
         "trace_tail": r.trace[-8:],
     }
+
+
+# ── token fracture / compression helpers ──────────────────────────────────
+# Ported directly from OpenChimera (core/token_fracture.py and
+# skills/token-optimizer/optimizer.py). Bundled here so this package has
+# no runtime dependency on OpenChimera.
+
+def _estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return max(1, len(text) // 4)
+
+
+def _compress_context(
+    messages: list[dict[str, Any]],
+    query: str = "",
+    max_tokens: int = 3000,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    safe_messages = messages or []
+
+    original_text = "\n".join(str(item.get("content", "")) for item in safe_messages)
+    original_tokens = _estimate_tokens(original_text)
+
+    if max_tokens <= 0 or original_tokens <= max_tokens:
+        compressed_messages = [
+            {"role": item.get("role", "user"),
+             "content": str(item.get("content", ""))}
+            for item in safe_messages
+        ]
+        compressed_tokens = original_tokens
+    else:
+        ratio = max_tokens / max(original_tokens, 1)
+        compressed_messages = []
+        for item in safe_messages:
+            content = str(item.get("content", ""))
+            keep = max(1, int(len(content) * ratio))
+            compressed_messages.append(
+                {"role": item.get("role", "user"), "content": content[:keep]}
+            )
+        compressed_text = "\n".join(
+            str(item.get("content", "")) for item in compressed_messages
+        )
+        compressed_tokens = _estimate_tokens(compressed_text)
+
+    stats = {
+        "query": query,
+        "original_messages": len(safe_messages),
+        "original_tokens": original_tokens,
+        "compressed_tokens": compressed_tokens,
+        "target_max_tokens": max_tokens,
+        "compression_ratio": (
+            (compressed_tokens / original_tokens) if original_tokens else 1.0
+        ),
+    }
+    return compressed_messages, stats
+
+
+def _optimize_text(text: str, target_ratio: float = 0.02) -> str:
+    """Extremely aggressive text extraction (3-stage structural + entity + frequency)."""
+    original_len = len(text)
+    if original_len == 0:
+        return ""
+
+    target_len = max(int(original_len * target_ratio), 10)
+
+    # 1. Structural code signatures
+    structural_patterns = re.findall(
+        r'^(?:def|class|interface|type|const|let|var|public|private|protected)'
+        r'\s+[\w\s\(:\,<>.=\)]+[{;:]',
+        text,
+        re.MULTILINE,
+    )
+
+    # 2. Key entities — capitalized words & CONSTANTS
+    entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]+\b|\b[A-Z_]{3,}\b', text)
+
+    # 3. High-frequency nouns > 5 chars (excluding stopwords)
+    words = [w.lower() for w in re.findall(r'\b[A-Za-z]{5,}\b', text)]
+    stopwords = {
+        'return', 'import', 'export', 'public', 'private', 'static',
+        'function', 'class', 'extends', 'implements',
+        'which', 'their', 'there', 'about',
+    }
+    filtered = [w for w in words if w not in stopwords]
+    common = [w for w, _ in Counter(filtered).most_common(20)]
+
+    parts: list[str] = []
+    if structural_patterns:
+        parts.append("--- [STRUCTURAL LOGIC] ---")
+        parts.append("\n".join(structural_patterns[:20]))
+    if entities:
+        parts.append("--- [KEY ENTITIES] ---")
+        parts.append(" ".join(list(set(entities))[:30]))
+    if common:
+        parts.append("--- [HIGH FREQUENCY NOUNS] ---")
+        parts.append(" ".join(common))
+
+    extracted = "\n".join(parts)
+
+    # Hard-cap at target_ratio
+    if len(extracted) > target_len:
+        extracted = extracted[:target_len] + "..."
+
+    # If too short (pure prose with no code), grab first + last sentence
+    if len(extracted) < target_len // 2:
+        sentences = re.split(r'(?<=[.!?]) +', text.replace('\n', ' '))
+        if sentences:
+            extracted += "\n--- [CRITICAL EDGES] ---\n" + sentences[0]
+            if len(sentences) > 1:
+                extracted += " ... " + sentences[-1]
+            extracted = extracted[:target_len]
+
+    return (
+        f"== 98% OPTIMIZATION ACTIVE ==\n"
+        f"Original: {original_len} chars\n"
+        f"Optimized: {len(extracted)} chars\n\n"
+        f"{extracted}"
+    )
 
 
 # ── tool registry ─────────────────────────────────────────────────────────
@@ -312,6 +435,125 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {},
+            },
+        ),
+        Tool(
+            name="chimera_compress",
+            description=(
+                "Compress a conversation history to fit within a token budget. "
+                "Estimates tokens at len(text)//4, then proportionally truncates each "
+                "message so the total fits under max_tokens. "
+                "Use to shrink long chat histories before feeding them back into Claude."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "messages": {
+                        "type": "array",
+                        "description": "List of {role, content} message objects",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "role":    {"type": "string"},
+                                "content": {"type": "string"},
+                            },
+                            "required": ["role", "content"],
+                        },
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional guiding query (metadata only)",
+                        "default": "",
+                    },
+                    "max_tokens": {
+                        "type": "integer",
+                        "description": "Target token budget (default 3000)",
+                        "default": 3000,
+                        "minimum": 1,
+                    },
+                },
+                "required": ["messages"],
+            },
+        ),
+        Tool(
+            name="chimera_optimize",
+            description=(
+                "Aggressively compress a block of text to its semantic skeleton. "
+                "Three-stage extraction: (1) structural code signatures "
+                "(class/def/interface/const), (2) key entities (capitalized words & "
+                "CONSTANTS), (3) high-frequency nouns > 5 chars excluding stopwords. "
+                "Caps output at target_ratio of original length (default 2%). "
+                "Use to shrink large codebases or documents before feeding to Claude."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Raw text / code to optimize",
+                    },
+                    "target_ratio": {
+                        "type": "number",
+                        "description": "Fraction of original length to retain (default 0.02)",
+                        "default": 0.02,
+                        "minimum": 0.001,
+                        "maximum": 1.0,
+                    },
+                },
+                "required": ["text"],
+            },
+        ),
+        Tool(
+            name="chimera_fracture",
+            description=(
+                "Full token-fracture pipeline combining chimera_optimize and "
+                "chimera_compress. Steps: (1) optimize each document string via "
+                "aggressive extraction, (2) compress the message history to the token "
+                "budget, (3) run confidence_threshold detection on the result, "
+                "(4) return a quality-passed flag and combined stats. "
+                "Use as the primary pre-processing step before a complex Claude task."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "messages": {
+                        "type": "array",
+                        "description": "List of {role, content} message objects",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "role":    {"type": "string"},
+                                "content": {"type": "string"},
+                            },
+                            "required": ["role", "content"],
+                        },
+                    },
+                    "documents": {
+                        "type": "array",
+                        "description": "Optional list of document strings to optimize",
+                        "items": {"type": "string"},
+                        "default": [],
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional guiding query (metadata only)",
+                        "default": "",
+                    },
+                    "token_budget": {
+                        "type": "integer",
+                        "description": "Target total token budget (default 3000)",
+                        "default": 3000,
+                        "minimum": 1,
+                    },
+                    "optimize_ratio": {
+                        "type": "number",
+                        "description": "Fraction of original doc length to retain (default 0.05)",
+                        "default": 0.05,
+                        "minimum": 0.001,
+                        "maximum": 1.0,
+                    },
+                },
+                "required": ["messages"],
             },
         ),
     ]
@@ -678,6 +920,115 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     }
                     for r in log[-10:]
                 ],
+            })
+
+        # ── chimera_compress ──────────────────────────────────────────────
+        elif name == "chimera_compress":
+            messages   = arguments.get("messages") or []
+            query      = str(arguments.get("query", ""))
+            max_tokens = int(arguments.get("max_tokens", 3000))
+            compressed, stats = _compress_context(messages, query=query, max_tokens=max_tokens)
+            return _ok({
+                "compressed_messages": compressed,
+                "stats": {
+                    "original_messages":  stats["original_messages"],
+                    "original_tokens":    stats["original_tokens"],
+                    "compressed_tokens":  stats["compressed_tokens"],
+                    "compression_ratio":  round(stats["compression_ratio"], 4),
+                    "target_max_tokens":  stats["target_max_tokens"],
+                    "query":              stats["query"],
+                },
+            })
+
+        # ── chimera_optimize ──────────────────────────────────────────────
+        elif name == "chimera_optimize":
+            text         = str(arguments.get("text", ""))
+            target_ratio = float(arguments.get("target_ratio", 0.02))
+            optimized    = _optimize_text(text, target_ratio=target_ratio)
+            original_chars  = len(text)
+            optimized_chars = len(optimized)
+            reduction = (
+                (1.0 - optimized_chars / original_chars) * 100.0
+                if original_chars else 0.0
+            )
+            return _ok({
+                "optimized_text":    optimized,
+                "original_chars":    original_chars,
+                "optimized_chars":   optimized_chars,
+                "reduction_percent": round(reduction, 2),
+                "target_ratio":      target_ratio,
+            })
+
+        # ── chimera_fracture ──────────────────────────────────────────────
+        elif name == "chimera_fracture":
+            messages       = arguments.get("messages") or []
+            documents      = arguments.get("documents") or []
+            query          = str(arguments.get("query", ""))
+            token_budget   = int(arguments.get("token_budget", 3000))
+            optimize_ratio = float(arguments.get("optimize_ratio", 0.05))
+
+            # 1. optimize each document
+            optimized_documents: list[dict[str, Any]] = []
+            for i, doc in enumerate(documents):
+                doc_str = str(doc)
+                optimized = _optimize_text(doc_str, target_ratio=optimize_ratio)
+                optimized_documents.append({
+                    "index":           i,
+                    "original_chars":  len(doc_str),
+                    "optimized_chars": len(optimized),
+                    "optimized_text":  optimized,
+                })
+
+            # 2. compress the message history
+            compressed_messages, stats = _compress_context(
+                messages, query=query, max_tokens=token_budget,
+            )
+
+            # 3. confidence_threshold-style quality gate
+            # Quality passes when we stayed at or under budget AND retained >= 10%
+            # of the original signal (avoids near-empty collapse).
+            compression_ratio = stats["compression_ratio"]
+            under_budget = stats["compressed_tokens"] <= token_budget
+            quality_passed = bool(under_budget and compression_ratio >= 0.10)
+
+            flags: list[dict[str, Any]] = []
+            if not under_budget:
+                flags.append({
+                    "kind":        "BUDGET_EXCEEDED",
+                    "severity":    0.9,
+                    "description": (
+                        f"Compressed tokens {stats['compressed_tokens']} "
+                        f"still exceed budget {token_budget}"
+                    ),
+                })
+            if compression_ratio < 0.10:
+                flags.append({
+                    "kind":        "EXCESSIVE_COMPRESSION",
+                    "severity":    round(1.0 - compression_ratio, 3),
+                    "description": (
+                        f"Retained only {compression_ratio:.1%} of original signal — "
+                        "output may be too degraded to be useful."
+                    ),
+                })
+
+            budget_remaining = max(0, token_budget - stats["compressed_tokens"])
+
+            return _ok({
+                "compressed_messages":  compressed_messages,
+                "optimized_documents":  optimized_documents,
+                "token_budget_used":    stats["compressed_tokens"],
+                "budget_remaining":     budget_remaining,
+                "quality_passed":       quality_passed,
+                "compression_stats": {
+                    "original_messages":  stats["original_messages"],
+                    "original_tokens":    stats["original_tokens"],
+                    "compressed_tokens":  stats["compressed_tokens"],
+                    "compression_ratio":  round(compression_ratio, 4),
+                    "target_max_tokens":  stats["target_max_tokens"],
+                    "documents_processed": len(optimized_documents),
+                    "query":              stats["query"],
+                },
+                "quality_flags": flags,
             })
 
         else:

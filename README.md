@@ -2,7 +2,7 @@
 
 **Give Claude typed confidence, hallucination detection, and constraint enforcement — as native MCP tools.**
 
-ChimeraLang is a programming language built for AI cognition. This MCP server exposes its runtime as 9 tools Claude can call during any conversation — no Anthropic permission needed, works today with Claude Desktop and Claude Code.
+ChimeraLang is a programming language built for AI cognition. This MCP server exposes its runtime as 12 tools Claude can call during any conversation — no Anthropic permission needed, works today with Claude Desktop and Claude Code.
 
 ---
 
@@ -46,7 +46,7 @@ Or with pip-installed version:
 }
 ```
 
-Restart Claude Desktop — 9 ChimeraLang tools are now available.
+Restart Claude Desktop — 12 ChimeraLang tools are now available.
 
 ---
 
@@ -63,6 +63,9 @@ Restart Claude Desktop — 9 ChimeraLang tools are now available.
 | `chimera_typecheck` | Static type-check a `.chimera` program |
 | `chimera_prove` | Execute + Merkle-chain integrity proof |
 | `chimera_audit` | Session-level call log and confidence summary |
+| `chimera_compress` | Proportional message-history compression to a token budget |
+| `chimera_optimize` | Aggressive text extraction (structural + entity + frequency) |
+| `chimera_fracture` | Full pipeline — optimize docs + compress messages + quality gate |
 
 ---
 
