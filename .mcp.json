@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "chimeralang": {
+      "command": "python",
+      "args": ["-m", "chimeralang_mcp.server"]
+    }
+  }
+}
