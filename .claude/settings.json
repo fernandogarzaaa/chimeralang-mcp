@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pip install -e . -q 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}
