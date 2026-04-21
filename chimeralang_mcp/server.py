@@ -409,38 +409,38 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="chimera_fracture",
             description=(
-                "Split a large text into token-budget-sized fragments for incremental processing. "
-                "Each fragment is numbered and optionally overlapped with its neighbour "
-                "to preserve cross-boundary context. "
-                "Use when a document exceeds your context budget and must be processed in passes."
+                "Full compression pipeline: chimera_optimize each document → chimera_compress messages "
+                "(lossy if opted in) → TokenBudgetManager budget gate → quality flag. "
+                "This is the primary pre-processing step before any complex Claude task. "
+                "Returns quality_passed, combined stats, budget_remaining, and lossy_dropped_count."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "Source text to fracture",
+                    "messages": {
+                        "type": "array",
+                        "description": "Conversation history [{role, content}]. "
+                                       "Compressed to fit token_budget before processing.",
                     },
-                    "max_chars": {
+                    "documents": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Document strings to optimise and compress.",
+                    },
+                    "token_budget": {
                         "type": "integer",
-                        "description": "Maximum characters per fragment (proxy for token budget). Default 2000.",
-                        "default": 2000,
-                        "minimum": 100,
+                        "description": "Maximum tokens for the compressed output. Default 1500.",
+                        "default": 1500,
                     },
-                    "overlap_chars": {
-                        "type": "integer",
-                        "description": "Characters of overlap between adjacent fragments. Default 100.",
-                        "default": 100,
-                        "minimum": 0,
-                    },
-                    "split_on": {
-                        "type": "string",
-                        "enum": ["sentence", "paragraph", "char"],
-                        "description": "Boundary strategy: sentence (.), paragraph (\\n\\n), or raw char. Default paragraph.",
-                        "default": "paragraph",
+                    "allow_lossy": {
+                        "type": "boolean",
+                        "description": (
+                            "When True and token_budget is exceeded, drop lowest-importance messages "
+                            "until the budget is met. Default False (lossless)."
+                        ),
+                        "default": False,
                     },
                 },
-                "required": ["text"],
             },
         ),
         Tool(
@@ -928,57 +928,121 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 ],
             })
 
-        # ── chimera_fracture ──────────────────────────────────────────────
+        # ── chimera_fracture — full pipeline ──────────────────────────────
         elif name == "chimera_fracture":
             import re as _re
-            text          = arguments["text"]
-            max_chars     = int(arguments.get("max_chars", 2000))
-            overlap_chars = int(arguments.get("overlap_chars", 100))
-            split_on      = arguments.get("split_on", "paragraph")
 
-            if split_on == "paragraph":
-                units = [u for u in _re.split(r"\n{2,}", text) if u.strip()]
-            elif split_on == "sentence":
-                units = [u.strip() for u in _re.split(r"(?<=[.!?])\s+", text) if u.strip()]
-            else:  # char — just slice directly
-                units = [text[i:i + max_chars] for i in range(0, len(text), max_chars - overlap_chars)]
+            messages     = arguments.get("messages", [])
+            documents    = arguments.get("documents", [])
+            token_budget = int(arguments.get("token_budget", 1500))
+            allow_lossy  = bool(arguments.get("allow_lossy", False))
 
-            fragments: list[str] = []
-            if split_on != "char":
-                buf = ""
-                for unit in units:
-                    candidate = (buf + "\n\n" + unit).strip() if buf else unit
-                    if len(candidate) <= max_chars:
-                        buf = candidate
-                    else:
-                        if buf:
-                            fragments.append(buf)
-                        buf = unit
-                if buf:
-                    fragments.append(buf)
-                # apply overlap: prepend tail of previous fragment
-                if overlap_chars > 0 and len(fragments) > 1:
-                    overlapped = [fragments[0]]
-                    for i in range(1, len(fragments)):
-                        tail    = fragments[i - 1][-overlap_chars:]
-                        overlapped.append(tail + "\n\n" + fragments[i])
-                    fragments = overlapped
-            # char path already sliced
+            total_start = time.time()
+            stats: dict[str, Any] = {
+                "documents_input": sum(len(d) for d in documents),
+                "messages_input":  len(messages),
+                "tokens_input":    _tbm.count_messages(messages),
+            }
+
+            # Step 1: optimize each document
+            optimised_docs: list[str] = []
+            for doc in documents:
+                # Quick optimise: whitespace + strip_filler (skip dedup_sentences/collapse_lists for speed)
+                d = _re.sub(r"[ \t]+", " ", doc)
+                d = _re.sub(r"\n{3,}", "\n\n", d).strip()
+                for pat in [
+                    r"\bplease note that\b", r"\bit is worth noting that\b",
+                    r"\bit should be noted that\b", r"\bin order to\b",
+                    r"\bbasically\b", r"\bactually\b", r"\bvery\b",
+                    r"\bjust\b", r"\bsimply\b", r"\bquite\b",
+                    r"\bof course\b", r"\bneedless to say\b",
+                ]:
+                    d = _re.sub(pat, "", d, flags=_re.IGNORECASE)
+                d = _re.sub(r"[ \t]{2,}", " ", d).strip()
+                optimised_docs.append(d)
+
+            stats["documents_optimised"] = sum(len(d) for d in optimised_docs)
+
+            # Step 2: compress messages (lossless first)
+            if messages:
+                msg_text = "\n".join(
+                    f"[{m.get('role', 'user')}]: {m.get('content', '')}"
+                    for m in messages
+                )
+                compressed = _re.sub(r"[ \t]+", " ", msg_text)
+                compressed = _re.sub(r"\n{3,}", "\n\n", compressed).strip()
+                for pat, repl in {
+                    r"\bdo not\b": "don't", r"\bdoes not\b": "doesn't",
+                    r"\bdid not\b": "didn't", r"\bcannot\b": "can't",
+                    r"\bwill not\b": "won't", r"\bwould not\b": "wouldn't",
+                    r"\bshould not\b": "shouldn't", r"\bcould not\b": "couldn't",
+                    r"\bare not\b": "aren't", r"\bwas not\b": "wasn't",
+                    r"\bwere not\b": "weren't", r"\bhave not\b": "haven't",
+                    r"\bhas not\b": "hasn't", r"\bhad not\b": "hadn't",
+                    r"\bit is\b": "it's", r"\bthat is\b": "that's",
+                }.items():
+                    compressed = _re.sub(pat, repl, compressed, flags=_re.IGNORECASE)
+                messages_compressed = compressed
+            else:
+                messages_compressed = ""
+
+            tokens_after = _tbm.count_tokens(messages_compressed) + _tbm.count_texts(optimised_docs)
+            stats["tokens_after_pipeline"] = tokens_after
+            budget_remaining = max(0, token_budget - tokens_after)
+            quality_passed = tokens_after <= token_budget
+            lossy_dropped_count = 0
+
+            # Step 3: lossy if needed and opted in
+            if not quality_passed and allow_lossy:
+                ranked = _scorer.rank(messages)
+                min_keep = 2
+                to_drop: list[dict[str, Any]] = []
+                for entry in ranked:
+                    if len(messages) - len(to_drop) <= min_keep:
+                        break
+                    to_drop.append(entry)
+                dropped_scores = [e["score"] for e in to_drop]
+                kept = [m for i, m in enumerate(messages)
+                        if i not in {e["index"] for e in to_drop}]
+                if to_drop:
+                    tombstone = {
+                        "role": "system",
+                        "content": (
+                            f"[{len(to_drop)} messages omitted — "
+                            f"low importance scores: {', '.join(str(s) for s in dropped_scores)}]"
+                        ),
+                    }
+                    kept.append(tombstone)
+                    messages = kept
+                    lossy_dropped_count = len(to_drop)
+                    # Re-compress kept messages
+                    msg_text = "\n".join(
+                        f"[{m.get('role', 'user')}]: {m.get('content', '')}"
+                        for m in messages
+                    )
+                    compressed = _re.sub(r"[ \t]+", " ", msg_text)
+                    compressed = _re.sub(r"\n{3,}", "\n\n", compressed).strip()
+                    messages_compressed = compressed
+                    tokens_after = _tbm.count_tokens(messages_compressed) + _tbm.count_texts(optimised_docs)
+                    budget_remaining = max(0, token_budget - tokens_after)
+                    quality_passed = tokens_after <= token_budget
+
+            stats["tokens_after_pipeline"] = tokens_after
+            stats["budget_remaining"] = budget_remaining
+            stats["lossy_dropped_count"] = lossy_dropped_count
+            stats["duration_ms"] = round((time.time() - total_start) * 1000, 1)
 
             return _ok({
-                "fragment_count": len(fragments),
-                "total_chars":    len(text),
-                "max_chars":      max_chars,
-                "overlap_chars":  overlap_chars,
-                "split_on":       split_on,
-                "fragments": [
-                    {
-                        "index":      i,
-                        "chars":      len(f),
-                        "text":       f,
-                    }
-                    for i, f in enumerate(fragments)
-                ],
+                "quality_passed":      quality_passed,
+                "budget_remaining":    budget_remaining,
+                "tokens_input":        stats["tokens_input"],
+                "tokens_after_pipeline": tokens_after,
+                "documents_input":    stats["documents_input"],
+                "documents_optimised": stats["documents_optimised"],
+                "messages_input":      stats["messages_input"],
+                "lossy_dropped_count": lossy_dropped_count,
+                "compression_time_ms": stats["duration_ms"],
+                "token_count_method": _tbm.get_stats()["token_count_method"],
             })
 
         # ── chimera_optimize ──────────────────────────────────────────────
