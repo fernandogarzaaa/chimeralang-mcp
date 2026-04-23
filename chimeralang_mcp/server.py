@@ -72,12 +72,86 @@ except ImportError as e:
 
 log = logging.getLogger(__name__)
 
+# ── model pricing table (input $/1M tokens, output $/1M tokens) ───────────
+_MODEL_PRICING: dict[str, tuple[float, float]] = {
+    "claude-opus-4-7":      (15.00, 75.00),
+    "claude-sonnet-4-6":    ( 3.00, 15.00),
+    "claude-haiku-4-5":     ( 0.80,  4.00),
+    "claude-opus-4-5":      (15.00, 75.00),
+    "claude-sonnet-4-5":    ( 3.00, 15.00),
+    "claude-haiku-3-5":     ( 0.80,  4.00),
+    "gpt-4o":               ( 5.00, 15.00),
+    "gpt-4o-mini":          ( 0.15,  0.60),
+    "gpt-4-turbo":          (10.00, 30.00),
+    "gemini-1.5-pro":       ( 3.50, 10.50),
+    "gemini-1.5-flash":     ( 0.35,  1.05),
+}
+_DEFAULT_MODEL = "claude-sonnet-4-6"
+
+
+# ── cost tracker ──────────────────────────────────────────────────────────
+import collections as _collections
+import uuid as _uuid
+
+class _CostTracker:
+    """In-memory ring buffer of the last 100 cost events."""
+
+    def __init__(self, maxlen: int = 100) -> None:
+        self._history: collections.deque[dict[str, Any]] = _collections.deque(maxlen=maxlen)
+
+    def record(
+        self,
+        tokens_before: int,
+        tokens_after: int,
+        model: str = _DEFAULT_MODEL,
+        label: str = "",
+    ) -> dict[str, Any]:
+        input_price, _ = _MODEL_PRICING.get(model, _MODEL_PRICING[_DEFAULT_MODEL])
+        cost_before  = round(tokens_before * input_price / 1_000_000, 6)
+        cost_after   = round(tokens_after  * input_price / 1_000_000, 6)
+        savings      = round(cost_before - cost_after, 6)
+        pct_saved    = round((1 - tokens_after / tokens_before) * 100, 1) if tokens_before else 0.0
+        entry: dict[str, Any] = {
+            "request_id":    str(_uuid.uuid4())[:8],
+            "timestamp":     time.time(),
+            "label":         label,
+            "model":         model,
+            "tokens_before": tokens_before,
+            "tokens_after":  tokens_after,
+            "tokens_saved":  tokens_before - tokens_after,
+            "cost_before":   cost_before,
+            "cost_after":    cost_after,
+            "savings":       savings,
+            "pct_saved":     pct_saved,
+        }
+        self._history.append(entry)
+        return entry
+
+    def summary(self) -> dict[str, Any]:
+        history = list(self._history)
+        total_tokens_saved = sum(e["tokens_saved"] for e in history)
+        total_cost_saved   = round(sum(e["savings"] for e in history), 6)
+        total_cost_before  = round(sum(e["cost_before"] for e in history), 6)
+        avg_pct_saved      = round(
+            sum(e["pct_saved"] for e in history) / len(history), 1
+        ) if history else 0.0
+        return {
+            "request_count":      len(history),
+            "total_tokens_saved": total_tokens_saved,
+            "total_cost_saved":   total_cost_saved,
+            "total_cost_before":  total_cost_before,
+            "avg_pct_saved":      avg_pct_saved,
+            "history":            history[-10:],  # last 10 for brevity
+        }
+
+
 # ── session-scoped singletons ─────────────────────────────────────────────
-_middleware = ClaudeConstraintMiddleware(confidence_threshold=0.7)
-_detector   = HallucinationDetector()
-_tbm        = get_token_budget_manager()
-_scorer     = MessageImportanceScorer()
-server      = Server("chimeralang-mcp")
+_middleware    = ClaudeConstraintMiddleware(confidence_threshold=0.7)
+_detector      = HallucinationDetector()
+_tbm           = get_token_budget_manager()
+_scorer        = MessageImportanceScorer()
+_cost_tracker  = _CostTracker()
+server         = Server("chimeralang-mcp")
 
 # ── AGI component singletons (lazy-initialized) ───────────────────────────
 _causal_reasoning: CausalReasoning | None = None
@@ -560,6 +634,82 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["messages"],
+            },
+        ),
+        Tool(
+            name="chimera_cost_estimate",
+            description=(
+                "Deterministic cost estimate for a text or message list against any supported model. "
+                "Returns token count and estimated dollar cost with NO API call required. "
+                "Supports claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5, gpt-4o, gpt-4o-mini, "
+                "gemini-1.5-pro, and more. Use before sending to the LLM to predict spend."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Raw text to estimate. Use instead of messages for single strings.",
+                    },
+                    "messages": {
+                        "type": "array",
+                        "description": "Message list [{role, content}] to estimate. Use instead of text.",
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": f"Model name. Default: {_DEFAULT_MODEL}. Supported: {', '.join(_MODEL_PRICING)}",
+                        "default": _DEFAULT_MODEL,
+                    },
+                    "output_tokens": {
+                        "type": "integer",
+                        "description": "Expected output tokens (for total cost). Default 0 (input only).",
+                        "default": 0,
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="chimera_cost_track",
+            description=(
+                "Record a before/after compression event to the session cost tracker. "
+                "Call this after chimera_compress or chimera_fracture to log actual savings. "
+                "Stored in memory (last 100 entries). View with chimera_dashboard."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tokens_before": {
+                        "type": "integer",
+                        "description": "Token count before compression.",
+                    },
+                    "tokens_after": {
+                        "type": "integer",
+                        "description": "Token count after compression.",
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": f"Model used for pricing. Default: {_DEFAULT_MODEL}",
+                        "default": _DEFAULT_MODEL,
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "Optional label (e.g. task name) for this entry.",
+                        "default": "",
+                    },
+                },
+                "required": ["tokens_before", "tokens_after"],
+            },
+        ),
+        Tool(
+            name="chimera_dashboard",
+            description=(
+                "Return session-level cost intelligence summary: total tokens saved, "
+                "total dollars saved, average compression %, and the last 10 tracked events. "
+                "Use to report spend reduction to the user or to decide whether more compression is needed."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
             },
         ),
     ]
@@ -1435,6 +1585,55 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "note": "MemorySystem available from core.memory. Initialize with storage path for persistence.",
                 "available": _OPENCHIMERA_LOADED,
             })
+
+        # ── chimera_cost_estimate ──────────────────────────────────────────────
+        elif name == "chimera_cost_estimate":
+            model         = arguments.get("model", _DEFAULT_MODEL)
+            output_tokens = int(arguments.get("output_tokens", 0))
+            text          = arguments.get("text")
+            messages      = arguments.get("messages")
+
+            if text:
+                input_tokens = _tbm.count_tokens(str(text))
+            elif messages:
+                input_tokens = _tbm.count_messages(messages)
+            else:
+                return _err("Provide 'text' or 'messages'")
+
+            input_price, output_price = _MODEL_PRICING.get(model, _MODEL_PRICING[_DEFAULT_MODEL])
+            input_cost  = round(input_tokens  * input_price  / 1_000_000, 6)
+            output_cost = round(output_tokens * output_price / 1_000_000, 6)
+            total_cost  = round(input_cost + output_cost, 6)
+
+            return _ok({
+                "model":          model,
+                "input_tokens":   input_tokens,
+                "output_tokens":  output_tokens,
+                "input_cost_usd": input_cost,
+                "output_cost_usd": output_cost,
+                "total_cost_usd": total_cost,
+                "pricing_per_1m": {"input": input_price, "output": output_price},
+                "note": "token count via " + _tbm.get_stats()["token_count_method"],
+            })
+
+        # ── chimera_cost_track ────────────────────────────────────────────────
+        elif name == "chimera_cost_track":
+            entry = _cost_tracker.record(
+                tokens_before = int(arguments["tokens_before"]),
+                tokens_after  = int(arguments["tokens_after"]),
+                model         = arguments.get("model", _DEFAULT_MODEL),
+                label         = arguments.get("label", ""),
+            )
+            log.info(
+                "[CostTracker] %s → %s tokens ($%.4f → $%.4f) saved %.1f%%",
+                entry["tokens_before"], entry["tokens_after"],
+                entry["cost_before"], entry["cost_after"], entry["pct_saved"],
+            )
+            return _ok(entry)
+
+        # ── chimera_dashboard ─────────────────────────────────────────────────
+        elif name == "chimera_dashboard":
+            return _ok(_cost_tracker.summary())
 
         else:
             return _err(f"Unknown tool: {name}")

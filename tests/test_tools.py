@@ -1,10 +1,11 @@
-"""test_tools.py — integration tests for all 5 affected tools."""
+"""test_tools.py — integration tests for chimera tools."""
 from __future__ import annotations
 
 import unittest
 
 from chimeralang_mcp.server import (
     _ok, _err, _tbm, _scorer,
+    _MODEL_PRICING, _DEFAULT_MODEL, _CostTracker,
 )
 from chimeralang_mcp.token_engine import get_token_budget_manager
 
@@ -172,6 +173,69 @@ class TestChimeraFracturePipeline(unittest.TestCase):
         self.assertIn("quality_passed", {"quality_passed": quality_passed})
         self.assertGreaterEqual(budget_remaining, 0)
         self.assertIsInstance(quality_passed, bool)
+
+
+class TestCostTracker(unittest.TestCase):
+    """_CostTracker unit tests."""
+
+    def setUp(self):
+        self.tracker = _CostTracker(maxlen=10)
+
+    def test_record_returns_required_fields(self):
+        entry = self.tracker.record(tokens_before=1000, tokens_after=600)
+        for field in ("request_id", "timestamp", "tokens_before", "tokens_after",
+                      "tokens_saved", "cost_before", "cost_after", "savings", "pct_saved"):
+            self.assertIn(field, entry)
+
+    def test_tokens_saved_correct(self):
+        entry = self.tracker.record(tokens_before=1000, tokens_after=600)
+        self.assertEqual(entry["tokens_saved"], 400)
+
+    def test_pct_saved_correct(self):
+        entry = self.tracker.record(tokens_before=1000, tokens_after=500)
+        self.assertAlmostEqual(entry["pct_saved"], 50.0)
+
+    def test_cost_uses_model_pricing(self):
+        input_price, _ = _MODEL_PRICING["claude-haiku-4-5"]
+        entry = self.tracker.record(tokens_before=1_000_000, tokens_after=0, model="claude-haiku-4-5")
+        self.assertAlmostEqual(entry["cost_before"], input_price, places=2)
+
+    def test_summary_totals_accumulate(self):
+        self.tracker.record(tokens_before=1000, tokens_after=600)
+        self.tracker.record(tokens_before=2000, tokens_after=1000)
+        s = self.tracker.summary()
+        self.assertEqual(s["request_count"], 2)
+        self.assertEqual(s["total_tokens_saved"], 1400)
+        self.assertGreater(s["total_cost_saved"], 0)
+
+    def test_ring_buffer_caps_at_maxlen(self):
+        for i in range(15):
+            self.tracker.record(tokens_before=100, tokens_after=50)
+        self.assertEqual(self.tracker.summary()["request_count"], 10)
+
+    def test_summary_history_limited_to_10(self):
+        for i in range(20):
+            self.tracker.record(tokens_before=100, tokens_after=50)
+        s = self.tracker.summary()
+        self.assertLessEqual(len(s["history"]), 10)
+
+
+class TestChimera_cost_estimate(unittest.TestCase):
+    """chimera_cost_estimate logic tests."""
+
+    def test_known_model_pricing(self):
+        self.assertIn("claude-sonnet-4-6", _MODEL_PRICING)
+        self.assertIn("gpt-4o", _MODEL_PRICING)
+
+    def test_cost_scales_linearly(self):
+        input_price, _ = _MODEL_PRICING[_DEFAULT_MODEL]
+        tokens = 100_000
+        expected = round(tokens * input_price / 1_000_000, 6)
+        actual = round(_tbm.count_tokens("x" * (tokens * 4)) * input_price / 1_000_000, 6)
+        self.assertAlmostEqual(actual, expected, delta=0.01)
+
+    def test_default_model_exists(self):
+        self.assertIn(_DEFAULT_MODEL, _MODEL_PRICING)
 
 
 if __name__ == "__main__":
