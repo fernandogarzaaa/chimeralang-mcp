@@ -209,11 +209,10 @@ class MessageImportanceScorer:
     # ------------------------------------------------------------------
 
     def _recency(self, index: int, total: int) -> float:
-        """Score based on position from end. Last messages score 1.0."""
+        """Score based on position — newer (higher index) = higher score."""
         if total <= 1:
             return 1.0
-        position_from_end = total - 1 - index
-        return position_from_end / (total - 1)
+        return index / (total - 1)
 
     def _content_type_score(self, message: dict[str, Any]) -> float:
         content = str(message.get("content", ""))
