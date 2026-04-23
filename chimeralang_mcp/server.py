@@ -46,29 +46,293 @@ from chimeralang_mcp.token_engine import (
     get_token_budget_manager,
 )
 
-# ── AGI module imports from OpenChimera ────────────────────────────────────
-try:
-    from core.causal_reasoning import CausalGraph, CausalReasoning
-    from core.deliberation import DeliberationGraph
-    from core.deliberation_engine import DeliberationEngine
-    from core.metacognition import MetacognitionEngine
-    from core.meta_learning import MetaLearning
-    from core.goal_planner import DecompositionStrategyLearner, GoalPlanner
-    from core.world_model import SystemWorldModel
-    from core.safety_layer import SafetyLayer
-    from core.ethical_reasoning import EthicalReasoning
-    from core.embodied_interaction import EmbodiedInteraction
-    from core.social_cognition import SocialCognition
-    from core.transfer_learning import TransferLearning
-    from core.evolution import EvolutionEngine
-    from core.self_model import SelfModel
-    from core.knowledge_base import KnowledgeBase
-    from core.memory import MemorySystem
-    from core.quantum_engine import QuantumEngine, ConsensusResult
-    _OPENCHIMERA_LOADED = True
-except ImportError as e:
-    logging.warning("OpenChimera AGI modules not available: %s", e)
-    _OPENCHIMERA_LOADED = False
+# ── AGI: pure-Python implementations (no external core.* dependency) ────────
+import hashlib as _hashlib
+import uuid as _uuid2
+from collections import defaultdict as _defaultdict
+from dataclasses import dataclass as _dataclass, field as _field
+
+
+class _CausalGraph:
+    def __init__(self) -> None:
+        self.variables: set = set()
+        self.edges: list = []
+
+    @property
+    def edge_count(self) -> int:
+        return len(self.edges)
+
+
+class _CausalReasoning:
+    def __init__(self) -> None:
+        self.graph = _CausalGraph()
+
+    def add_edge(self, cause: str, effect: str, edge_type: str = "causes",
+                 strength: float = 0.5, confidence: float = 0.5,
+                 confidence_level: str = "observed") -> None:
+        self.graph.variables.update([cause, effect])
+        self.graph.edges.append({
+            "cause": cause, "effect": effect, "edge_type": edge_type,
+            "strength": strength, "confidence": confidence,
+            "confidence_level": confidence_level,
+        })
+
+    def query(self, cause: str | None = None, effect: str | None = None) -> list:
+        results = self.graph.edges
+        if cause:
+            results = [e for e in results if e["cause"] == cause]
+        if effect:
+            results = [e for e in results if e["effect"] == effect]
+        return results
+
+    def find_causal_paths(self, source: str, target: str, max_depth: int = 6) -> list:
+        adj: dict = _defaultdict(list)
+        for e in self.graph.edges:
+            adj[e["cause"]].append(e["effect"])
+        paths, queue = [], [[source]]
+        while queue and len(paths) < 10:
+            path = queue.pop(0)
+            node = path[-1]
+            if node == target:
+                paths.append({"path": path, "length": len(path) - 1})
+                continue
+            if len(path) > max_depth:
+                continue
+            for nb in adj.get(node, []):
+                if nb not in path:
+                    queue.append(path + [nb])
+        return paths
+
+
+class _DeliberationEngine:
+    @staticmethod
+    def _tok(text: str) -> set:
+        return set(re.sub(r"[^\w\s]", "", str(text).lower()).split())
+
+    def deliberate(self, prompt: str, perspectives: list) -> dict:
+        if not perspectives:
+            return {"consensus": None, "perspectives": [], "divergence": 1.0}
+        tokens = [self._tok(p.get("content", "") + " " + p.get("perspective", ""))
+                  for p in perspectives]
+        sims = []
+        for i in range(len(tokens)):
+            for j in range(i + 1, len(tokens)):
+                u = tokens[i] | tokens[j]
+                sims.append(len(tokens[i] & tokens[j]) / len(u) if u else 0.0)
+        avg_sim = sum(sims) / len(sims) if sims else 0.0
+        scores = []
+        for i, toks in enumerate(tokens):
+            others = set().union(*(tokens[j] for j in range(len(tokens)) if j != i))
+            scores.append((len(toks & others) / len(toks) if toks else 0.0, perspectives[i]))
+        consensus = max(scores, key=lambda x: x[0])[1] if scores else None
+        return {
+            "prompt": prompt,
+            "perspectives": perspectives,
+            "consensus_perspective": consensus,
+            "avg_similarity": round(avg_sim, 4),
+            "divergence": round(1.0 - avg_sim, 4),
+            "perspective_count": len(perspectives),
+        }
+
+
+class _SafetyLayer:
+    _PATTERNS = [
+        r"\bharm\b", r"\bkill\b", r"\battack\b", r"\bweapon\b", r"\bexploit\b",
+        r"\bmalware\b", r"\bvirus\b", r"\bpoison\b", r"\bterror\b", r"\bself.harm\b",
+    ]
+
+    def __init__(self) -> None:
+        self._blocked_count = 0
+        self._allowed_count = 0
+        self._compiled = [re.compile(p, re.IGNORECASE) for p in self._PATTERNS]
+
+    def validate_content(self, content: str) -> tuple[bool, str]:
+        for pat in self._compiled:
+            if pat.search(content):
+                self._blocked_count += 1
+                return False, f"Forbidden pattern detected: {pat.pattern}"
+        self._allowed_count += 1
+        return True, "Content passed safety validation"
+
+
+class _EthicalReasoning:
+    _VIOLATIONS = {
+        "non_maleficence": [r"\bharm\b", r"\bhurt\b", r"\bdamage\b", r"\binjure\b"],
+        "autonomy":        [r"\bforce\b", r"\bmanipulate\b", r"\bcoerce\b"],
+        "justice":         [r"\bdiscriminate\b", r"\bbias\b", r"\bunfair\b"],
+    }
+    _UPHELD = {
+        "beneficence":   [r"\bhelp\b", r"\bimprove\b", r"\bbenefit\b", r"\bsupport\b"],
+        "transparency":  [r"\bexplain\b", r"\btransparent\b", r"\bdisclose\b"],
+        "privacy":       [r"\bprotect\b", r"\bsecure\b", r"\bconfidential\b"],
+    }
+
+    def evaluate_action(self, action_desc: str) -> dict:
+        violated = [p for p, pats in self._VIOLATIONS.items()
+                    if any(re.search(pat, action_desc, re.IGNORECASE) for pat in pats)]
+        upheld   = [p for p, pats in self._UPHELD.items()
+                    if any(re.search(pat, action_desc, re.IGNORECASE) for pat in pats)]
+        score    = max(0.0, min(1.0, 0.5 + len(upheld) * 0.15 - len(violated) * 0.2))
+        return {
+            "action":              action_desc,
+            "is_ethical":          score >= 0.5 and not violated,
+            "score":               round(score, 3),
+            "principles_violated": violated,
+            "principles_upheld":   upheld,
+            "recommendation":      "Proceed" if (score >= 0.5 and not violated) else "Review required",
+        }
+
+
+@_dataclass
+class _KBEntry:
+    entry_id: str
+    content:  str
+    category: str
+    tags:     list
+
+
+class _KnowledgeBase:
+    def __init__(self) -> None:
+        self._entries: dict[str, _KBEntry] = {}
+
+    def add(self, content: str, category: str = "general", tags: list | None = None) -> _KBEntry:
+        eid = _hashlib.sha256(f"{content}{time.time()}".encode()).hexdigest()[:12]
+        entry = _KBEntry(entry_id=eid, content=content, category=category, tags=tags or [])
+        self._entries[eid] = entry
+        return entry
+
+    def search(self, query: str) -> list:
+        q = query.lower()
+        return [
+            {"entry_id": e.entry_id, "content": e.content,
+             "category": e.category, "tags": e.tags}
+            for e in self._entries.values()
+            if q in e.content.lower() or q in e.category.lower()
+            or any(q in t.lower() for t in e.tags)
+        ]
+
+
+class _WorldModel:
+    def __init__(self) -> None:
+        self._facts: dict = {}
+
+    def update(self, key: str, value: Any, confidence: float = 0.8) -> dict:
+        self._facts[key] = {"value": value, "confidence": confidence, "updated_at": time.time()}
+        return {"updated": key, "fact_count": len(self._facts)}
+
+    def query(self, key: str | None = None) -> dict:
+        if key:
+            return self._facts.get(key, {"error": f"Key '{key}' not found"})
+        return {"facts": self._facts, "fact_count": len(self._facts)}
+
+
+class _SelfModel:
+    def __init__(self) -> None:
+        self._capabilities: dict = {}
+        self._observations:  list = []
+
+    def update(self, capability: str, level: str = "present", evidence: str = "") -> dict:
+        self._capabilities[capability] = {"level": level, "evidence": evidence}
+        return {"updated": capability, "capability_count": len(self._capabilities)}
+
+    def reflect(self) -> dict:
+        return {"capabilities": self._capabilities,
+                "observations": self._observations[-10:]}
+
+
+class _MemoryStore:
+    def __init__(self) -> None:
+        self._entries: list = []
+
+    def store(self, content: str, tags: list | None = None,
+              importance: float = 0.5) -> dict:
+        entry = {"id": len(self._entries), "content": content,
+                 "tags": tags or [], "importance": importance,
+                 "stored_at": time.time()}
+        self._entries.append(entry)
+        return {"stored": True, "id": entry["id"], "total": len(self._entries)}
+
+    def recall(self, query: str | None = None, limit: int = 10) -> dict:
+        entries = self._entries
+        if query:
+            q = query.lower()
+            entries = [e for e in entries
+                       if q in e["content"].lower()
+                       or any(q in t.lower() for t in e.get("tags", []))]
+        return {"entries": sorted(entries, key=lambda e: e["importance"],
+                                  reverse=True)[:limit]}
+
+
+class _MetaLearner:
+    def __init__(self) -> None:
+        self._adaptations: list = []
+
+    def record_adaptation(self, context: str = "", action: str = "",
+                          outcome: str = "", confidence: float = 0.5) -> dict:
+        entry = {"context": context, "action": action, "outcome": outcome,
+                 "confidence": confidence, "recorded_at": time.time()}
+        self._adaptations.append(entry)
+        return {"recorded": True, "total_adaptations": len(self._adaptations)}
+
+    def get_stats(self) -> dict:
+        return {"total_adaptations": len(self._adaptations),
+                "recent": self._adaptations[-5:]}
+
+
+def _quantum_vote(responses: list, timeout_s: float = 5.0) -> dict:
+    if not responses:
+        return {"error": "No responses provided"}
+    scores: dict[str, float] = _defaultdict(float)
+    counts: dict[str, int]   = _defaultdict(int)
+    for r in responses:
+        ans    = str(r.get("answer", ""))
+        lat    = max(float(r.get("latency_ms", 100.0)), 1.0)
+        weight = 1000.0 / lat + float(r.get("confidence", 0.5))
+        scores[ans] += weight
+        counts[ans] += 1
+    total      = sum(scores.values())
+    best       = max(scores, key=scores.__getitem__)
+    conf       = scores[best] / total if total else 0.0
+    contradictions = sum(1 for a, s in scores.items()
+                         if a != best and s / total > 0.2)
+    return {
+        "answer":        best,
+        "confidence":    round(min(conf, 1.0), 4),
+        "participating": len(responses),
+        "early_exit":    conf >= 0.95,
+        "contradictions": contradictions,
+    }
+
+
+def _plan_goals(goal: str) -> dict:
+    g = goal.lower()
+    if any(w in g for w in ["build", "create", "implement", "develop", "write"]):
+        strategy  = "iterative_build"
+        sub_goals = ["Define requirements", "Design architecture",
+                     "Implement core", "Test and validate", "Deploy and monitor"]
+    elif any(w in g for w in ["analyze", "evaluate", "assess", "review"]):
+        strategy  = "analytical_decomposition"
+        sub_goals = ["Gather data", "Define evaluation criteria",
+                     "Run analysis", "Synthesize findings", "Report conclusions"]
+    elif any(w in g for w in ["fix", "debug", "resolve", "repair"]):
+        strategy  = "diagnostic_repair"
+        sub_goals = ["Reproduce issue", "Isolate root cause",
+                     "Design fix", "Apply and verify", "Add regression test"]
+    elif any(w in g for w in ["should", "whether", "decide", "choose"]):
+        strategy  = "decision_framework"
+        sub_goals = ["Define decision criteria", "Gather evidence",
+                     "Analyze trade-offs", "Apply safety/ethics check", "Form verdict"]
+    else:
+        strategy  = "general_decomposition"
+        sub_goals = ["Clarify scope", "Identify stakeholders",
+                     "Map dependencies", "Execute in phases", "Verify outcomes"]
+    return {
+        "goal":                 goal,
+        "best_known_strategy":  strategy,
+        "sub_goals":            sub_goals,
+        "confidence":           0.75,
+        "note":                 "Heuristic decomposition — refine with domain knowledge",
+    }
 
 log = logging.getLogger(__name__)
 
@@ -154,57 +418,78 @@ _cost_tracker  = _CostTracker()
 server         = Server("chimeralang-mcp")
 
 # ── AGI component singletons (lazy-initialized) ───────────────────────────
-_causal_reasoning: CausalReasoning | None = None
-_deliberation_engine: DeliberationEngine | None = None
-_metacog_engine: MetacognitionEngine | None = None
-_meta_learner: MetaLearning | None = None
-_goal_planner: GoalPlanner | None = None
-_world_model: SystemWorldModel | None = None
-_safety_layer: SafetyLayer | None = None
-_ethical_reasoner: EthicalReasoning | None = None
-_embodied: EmbodiedInteraction | None = None
-_social: SocialCognition | None = None
-_transfer: TransferLearning | None = None
-_evolution: EvolutionEngine | None = None
-_self_model: SelfModel | None = None
-_kb: KnowledgeBase | None = None
-_memory: MemorySystem | None = None
-_quantum: QuantumEngine | None = None
+_causal_reasoning:    _CausalReasoning | None    = None
+_deliberation_engine: _DeliberationEngine | None = None
+_safety_layer:        _SafetyLayer | None        = None
+_ethical_reasoner:    _EthicalReasoning | None   = None
+_kb:                  _KnowledgeBase | None      = None
+_world_model_inst:    _WorldModel | None         = None
+_self_model_inst:     _SelfModel | None          = None
+_memory_store:        _MemoryStore | None        = None
+_meta_learner_inst:   _MetaLearner | None        = None
 
 
-def _get_causal() -> CausalReasoning:
+def _get_causal() -> _CausalReasoning:
     global _causal_reasoning
     if _causal_reasoning is None:
-        _causal_reasoning = CausalReasoning()
+        _causal_reasoning = _CausalReasoning()
     return _causal_reasoning
 
 
-def _get_deliberation() -> DeliberationEngine:
+def _get_deliberation() -> _DeliberationEngine:
     global _deliberation_engine
     if _deliberation_engine is None:
-        _deliberation_engine = DeliberationEngine()
+        _deliberation_engine = _DeliberationEngine()
     return _deliberation_engine
 
 
-def _get_safety() -> SafetyLayer:
+def _get_safety() -> _SafetyLayer:
     global _safety_layer
     if _safety_layer is None:
-        _safety_layer = SafetyLayer()
+        _safety_layer = _SafetyLayer()
     return _safety_layer
 
 
-def _get_ethical() -> EthicalReasoning:
+def _get_ethical() -> _EthicalReasoning:
     global _ethical_reasoner
     if _ethical_reasoner is None:
-        _ethical_reasoner = EthicalReasoning()
+        _ethical_reasoner = _EthicalReasoning()
     return _ethical_reasoner
 
 
-def _get_kb() -> KnowledgeBase:
+def _get_kb() -> _KnowledgeBase:
     global _kb
     if _kb is None:
-        _kb = KnowledgeBase()
+        _kb = _KnowledgeBase()
     return _kb
+
+
+def _get_world_model() -> _WorldModel:
+    global _world_model_inst
+    if _world_model_inst is None:
+        _world_model_inst = _WorldModel()
+    return _world_model_inst
+
+
+def _get_self_model() -> _SelfModel:
+    global _self_model_inst
+    if _self_model_inst is None:
+        _self_model_inst = _SelfModel()
+    return _self_model_inst
+
+
+def _get_memory() -> _MemoryStore:
+    global _memory_store
+    if _memory_store is None:
+        _memory_store = _MemoryStore()
+    return _memory_store
+
+
+def _get_meta_learner() -> _MetaLearner:
+    global _meta_learner_inst
+    if _meta_learner_inst is None:
+        _meta_learner_inst = _MetaLearner()
+    return _meta_learner_inst
 
 
 # ── helpers ───────────────────────────────────────────────────────────────
@@ -710,6 +995,256 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {},
+            },
+        ),
+        # ── AGI tools ─────────────────────────────────────────────────────
+        Tool(
+            name="chimera_causal",
+            description=(
+                "Manage a causal graph: add directed cause→effect edges, query edges by "
+                "cause/effect, or find causal pathways between two nodes. "
+                "Actions: add_edge | query | paths | info."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action":           {"type": "string", "enum": ["add_edge", "query", "paths", "info"], "default": "info"},
+                    "cause":            {"type": "string"},
+                    "effect":           {"type": "string"},
+                    "edge_type":        {"type": "string", "default": "causes"},
+                    "strength":         {"type": "number", "default": 0.5},
+                    "confidence":       {"type": "number", "default": 0.5},
+                    "confidence_level": {"type": "string", "default": "observed"},
+                    "source":           {"type": "string"},
+                    "target":           {"type": "string"},
+                },
+            },
+        ),
+        Tool(
+            name="chimera_deliberate",
+            description=(
+                "Run multi-perspective deliberation on a prompt. Supply a list of perspectives "
+                "(each with 'perspective' label and 'content') and receive a consensus analysis "
+                "with Jaccard similarity, divergence score, and the most-consensus perspective."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "prompt":       {"type": "string"},
+                    "perspectives": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "perspective": {"type": "string"},
+                                "content":     {"type": "string"},
+                            },
+                        },
+                    },
+                },
+                "required": ["prompt", "perspectives"],
+            },
+        ),
+        Tool(
+            name="chimera_metacognize",
+            description=(
+                "Reflect on reasoning quality for a list of predictions. Computes Expected "
+                "Calibration Error (ECE), overconfidence rate, and underconfidence rate. "
+                "Supply predictions as [{predicted_confidence, was_correct}]."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "predictions": {
+                        "type": "array",
+                        "description": "List of {predicted_confidence: float, was_correct: bool}",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "predicted_confidence": {"type": "number"},
+                                "was_correct":          {"type": "boolean"},
+                            },
+                        },
+                    },
+                    "label": {"type": "string", "default": ""},
+                },
+            },
+        ),
+        Tool(
+            name="chimera_meta_learn",
+            description=(
+                "Record an adaptation event (context, action taken, outcome, confidence) "
+                "for meta-learning. Action 'record' stores the event; 'stats' returns totals."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action":     {"type": "string", "enum": ["record", "stats"], "default": "stats"},
+                    "context":    {"type": "string", "default": ""},
+                    "action_taken": {"type": "string", "default": ""},
+                    "outcome":    {"type": "string", "default": ""},
+                    "confidence": {"type": "number", "default": 0.5},
+                },
+            },
+        ),
+        Tool(
+            name="chimera_quantum_vote",
+            description=(
+                "Multi-agent consensus voting. Supply a list of agent responses "
+                "(each with 'answer' and optional 'confidence', 'latency_ms') and receive "
+                "the winning answer, confidence, contradiction count, and early-exit flag."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "responses": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "answer":      {},
+                                "confidence":  {"type": "number"},
+                                "latency_ms":  {"type": "number"},
+                            },
+                            "required": ["answer"],
+                        },
+                        "minItems": 1,
+                    },
+                    "timeout_s": {"type": "number", "default": 5.0},
+                },
+                "required": ["responses"],
+            },
+        ),
+        Tool(
+            name="chimera_plan_goals",
+            description=(
+                "Decompose a high-level goal into sub-goals using heuristic strategy selection. "
+                "Detects goal type (build/analyze/fix/decide/general) and returns an ordered "
+                "sub-goal list with the chosen strategy name."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "goal": {"type": "string", "description": "High-level goal to decompose"},
+                },
+                "required": ["goal"],
+            },
+        ),
+        Tool(
+            name="chimera_world_model",
+            description=(
+                "Persistent in-session world model: store and retrieve facts as key→value pairs "
+                "with confidence scores. Actions: update | query. "
+                "Use to maintain a shared ground truth across reasoning steps."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action":     {"type": "string", "enum": ["update", "query"], "default": "query"},
+                    "key":        {"type": "string"},
+                    "value":      {},
+                    "confidence": {"type": "number", "default": 0.8},
+                },
+            },
+        ),
+        Tool(
+            name="chimera_safety_check",
+            description=(
+                "Validate content against a safety policy. Scans for forbidden patterns "
+                "(harm, violence, malware, etc.). Returns is_safe, reason, blocked/allowed counts."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "Content to validate"},
+                },
+                "required": ["content"],
+            },
+        ),
+        Tool(
+            name="chimera_ethical_eval",
+            description=(
+                "Evaluate an action description against ethical principles. "
+                "Checks for non-maleficence, autonomy, justice violations and "
+                "beneficence, transparency, privacy upholding. Returns score and recommendation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "description": "Action description to evaluate"},
+                },
+                "required": ["action"],
+            },
+        ),
+        Tool(
+            name="chimera_embodied",
+            description="Stub: EmbodiedInteraction module placeholder. Returns capability note.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="chimera_social",
+            description="Stub: SocialCognition module placeholder. Returns capability note.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="chimera_transfer_learn",
+            description="Stub: TransferLearning module placeholder. Returns capability note.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="chimera_evolve",
+            description="Stub: EvolutionEngine module placeholder. Returns capability note.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="chimera_self_model",
+            description=(
+                "Maintain a self-model of agent capabilities. "
+                "Actions: update (record a capability + evidence) | reflect (return all capabilities)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action":     {"type": "string", "enum": ["update", "reflect"], "default": "reflect"},
+                    "capability": {"type": "string"},
+                    "level":      {"type": "string", "default": "present"},
+                    "evidence":   {"type": "string", "default": ""},
+                },
+            },
+        ),
+        Tool(
+            name="chimera_knowledge",
+            description=(
+                "In-session knowledge base. Actions: add (store content with category+tags) | "
+                "search (query by keyword) | list (count entries and categories)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action":   {"type": "string", "enum": ["add", "search", "list"], "default": "search"},
+                    "content":  {"type": "string"},
+                    "category": {"type": "string", "default": "general"},
+                    "tags":     {"type": "array", "items": {"type": "string"}},
+                    "query":    {"type": "string"},
+                },
+            },
+        ),
+        Tool(
+            name="chimera_memory",
+            description=(
+                "In-session memory store. Actions: store (save content with tags+importance) | "
+                "recall (retrieve by keyword, sorted by importance)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action":     {"type": "string", "enum": ["store", "recall"], "default": "recall"},
+                    "content":    {"type": "string"},
+                    "tags":       {"type": "array", "items": {"type": "string"}},
+                    "importance": {"type": "number", "default": 0.5},
+                    "query":      {"type": "string"},
+                    "limit":      {"type": "integer", "default": 10},
+                },
             },
         ),
     ]
@@ -1406,185 +1941,186 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             })
 
         # ── AGI: chimera_causal ────────────────────────────────────────────
-        elif name == "chimera_causal" and _OPENCHIMERA_LOADED:
+        elif name == "chimera_causal":
             action = arguments.get("action", "info")
+            cr     = _get_causal()
             if action == "add_edge":
-                cr = _get_causal()
-                from core.causal_reasoning import CausalEdge, EdgeType, ConfidenceLevel
-                edge = CausalEdge(
+                cr.add_edge(
                     cause=arguments["cause"],
                     effect=arguments["effect"],
-                    edge_type=EdgeType(arguments.get("edge_type", "causes")),
+                    edge_type=arguments.get("edge_type", "causes"),
                     strength=float(arguments.get("strength", 0.5)),
                     confidence=float(arguments.get("confidence", 0.5)),
-                    confidence_level=ConfidenceLevel(arguments.get("confidence_level", "observed")),
+                    confidence_level=arguments.get("confidence_level", "observed"),
                 )
-                cr.add_edge(edge)
-                return _ok({"added": True, "edge": str(edge)})
+                return _ok({"added": True,
+                            "edge": f"{arguments['cause']} --{arguments.get('edge_type','causes')}--> {arguments['effect']}"})
             elif action == "query":
-                cr = _get_causal()
-                result = cr.query(cause=arguments.get("cause"), effect=arguments.get("effect"))
-                return _ok({"query_result": result})
+                return _ok({"query_result": cr.query(
+                    cause=arguments.get("cause"), effect=arguments.get("effect"))})
             elif action == "paths":
-                cr = _get_causal()
-                paths = cr.find_causal_paths(arguments.get("source", ""), arguments.get("target", ""))
-                return _ok({"paths": [vars(p) for p in paths]})
+                return _ok({"paths": cr.find_causal_paths(
+                    arguments.get("source", ""), arguments.get("target", ""))})
             else:
-                cr = _get_causal()
-                return _ok({"variables": list(cr.graph.variables), "edge_count": cr.graph.edge_count})
+                return _ok({"variables": sorted(cr.graph.variables),
+                            "edge_count": cr.graph.edge_count})
 
         # ── AGI: chimera_deliberate ────────────────────────────────────────
-        elif name == "chimera_deliberate" and _OPENCHIMERA_LOADED:
-            prompt = arguments.get("prompt", "")
-            perspectives = arguments.get("perspectives", [{"perspective": "default", "content": "", "model": "claude"}])
-            de = _get_deliberation()
-            result = de.deliberate(prompt, perspectives)
-            return _ok(result)
+        elif name == "chimera_deliberate":
+            prompt       = arguments.get("prompt", "")
+            perspectives = arguments.get("perspectives", [])
+            return _ok(_get_deliberation().deliberate(prompt, perspectives))
 
         # ── AGI: chimera_metacognize ───────────────────────────────────────
-        elif name == "chimera_metacognize" and _OPENCHIMERA_LOADED:
-            # Note: MetacognitionEngine requires db + bus; expose diagnostic only
+        elif name == "chimera_metacognize":
+            preds = arguments.get("predictions", [])
+            label = arguments.get("label", "")
+            if not preds:
+                return _ok({"ece": None, "note": "Supply predictions=[{predicted_confidence, was_correct}]"})
+            n = len(preds)
+            n_bins = min(10, n)
+            bin_size = 1.0 / n_bins
+            ece = 0.0
+            overconf = underconf = 0
+            for p in preds:
+                conf    = float(p.get("predicted_confidence", 0.5))
+                correct = bool(p.get("was_correct", False))
+                if conf > 0.5 and not correct:
+                    overconf += 1
+                elif conf < 0.5 and correct:
+                    underconf += 1
+            bins: dict = {}
+            for p in preds:
+                conf = float(p.get("predicted_confidence", 0.5))
+                b    = min(int(conf / bin_size), n_bins - 1)
+                bins.setdefault(b, []).append(p)
+            for b_preds in bins.values():
+                acc  = sum(1 for p in b_preds if p.get("was_correct")) / len(b_preds)
+                conf = sum(float(p.get("predicted_confidence", 0.5)) for p in b_preds) / len(b_preds)
+                ece += abs(acc - conf) * len(b_preds) / n
             return _ok({
-                "note": "MetacognitionEngine requires database + event bus. Use compute_ece() on an initialized engine.",
-                "available": _OPENCHIMERA_LOADED,
+                "label":               label,
+                "n":                   n,
+                "ece":                 round(ece, 4),
+                "overconfidence_rate": round(overconf / n, 3),
+                "underconfidence_rate": round(underconf / n, 3),
+                "calibration_status":  "good" if ece < 0.1 else "moderate" if ece < 0.2 else "poor",
             })
 
         # ── AGI: chimera_meta_learn ─────────────────────────────────────────
-        elif name == "chimera_meta_learn" and _OPENCHIMERA_LOADED:
-            action = arguments.get("action", "info")
-            if not hasattr(importlib, "import_module"):
-                import importlib
-            from core.meta_learning import MetaLearning
+        elif name == "chimera_meta_learn":
+            action = arguments.get("action", "stats")
+            ml     = _get_meta_learner()
             if action == "record":
-                ml = _meta_learner or MetaLearning()
-                ml.record_adaptation(...)
-                return _ok({"recorded": True})
-            return _ok({"available": True, "action": action})
+                return _ok(ml.record_adaptation(
+                    context=arguments.get("context", ""),
+                    action=arguments.get("action_taken", ""),
+                    outcome=arguments.get("outcome", ""),
+                    confidence=float(arguments.get("confidence", 0.5)),
+                ))
+            return _ok(ml.get_stats())
 
         # ── AGI: chimera_quantum_vote ──────────────────────────────────────
-        elif name == "chimera_quantum_vote" and _OPENCHIMERA_LOADED:
+        elif name == "chimera_quantum_vote":
             responses = arguments.get("responses", [])
-            timeout_s = float(arguments.get("timeout_s", 5.0))
             if not responses:
                 return _err("chimera_quantum_vote requires responses list")
-            try:
-                qe = QuantumEngine(timeout_s=timeout_s)
-                result: ConsensusResult = qe.gather_sync([
-                    {"agent_id": f"agent_{i}", "answer": r.get("answer"), "latency_ms": r.get("latency_ms", 100.0)}
-                    for i, r in enumerate(responses)
-                ])
-                return _ok({
-                    "answer": result.answer,
-                    "confidence": result.confidence,
-                    "participating": result.participating,
-                    "early_exit": result.early_exit,
-                    "contradictions": result.contradictions_found,
-                })
-            except Exception as e:
-                return _err(f"Quantum vote failed: {e}")
+            return _ok(_quantum_vote(responses,
+                                     timeout_s=float(arguments.get("timeout_s", 5.0))))
 
         # ── AGI: chimera_plan_goals ─────────────────────────────────────────
-        elif name == "chimera_plan_goals" and _OPENCHIMERA_LOADED:
+        elif name == "chimera_plan_goals":
             goal = arguments.get("goal", "")
             if not goal:
                 return _err("chimera_plan_goals requires a goal string")
-            learner = DecompositionStrategyLearner()
-            best = learner.best_strategy(goal[:50])
-            return _ok({
-                "goal": goal,
-                "best_known_strategy": best,
-                "note": "DecompositionStrategyLearner is stateless — attach persistence for learned strategies",
-            })
+            return _ok(_plan_goals(goal))
 
         # ── AGI: chimera_world_model ─────────────────────────────────────────
-        elif name == "chimera_world_model" and _OPENCHIMERA_LOADED:
-            return _ok({
-                "note": "SystemWorldModel requires a CausalReasoning instance. Use with full OpenChimera kernel.",
-                "available": _OPENCHIMERA_LOADED,
-            })
+        elif name == "chimera_world_model":
+            action = arguments.get("action", "query")
+            wm     = _get_world_model()
+            if action == "update":
+                return _ok(wm.update(
+                    key=arguments.get("key", ""),
+                    value=arguments.get("value"),
+                    confidence=float(arguments.get("confidence", 0.8)),
+                ))
+            return _ok(wm.query(key=arguments.get("key")))
 
         # ── AGI: chimera_safety_check ────────────────────────────────────────
-        elif name == "chimera_safety_check" and _OPENCHIMERA_LOADED:
-            content = arguments.get("content", "")
-            sl = _get_safety()
+        elif name == "chimera_safety_check":
+            content  = arguments.get("content", "")
+            sl       = _get_safety()
             is_safe, reason = sl.validate_content(content)
-            return _ok({
-                "is_safe": is_safe,
-                "reason": reason,
-                "blocked_count": sl._blocked_count,
-                "allowed_count": sl._allowed_count,
-            })
+            return _ok({"is_safe": is_safe, "reason": reason,
+                        "blocked_count": sl._blocked_count,
+                        "allowed_count": sl._allowed_count})
 
         # ── AGI: chimera_ethical_eval ────────────────────────────────────────
-        elif name == "chimera_ethical_eval" and _OPENCHIMERA_LOADED:
+        elif name == "chimera_ethical_eval":
             action_desc = arguments.get("action", "")
             if not action_desc:
                 return _err("chimera_ethical_eval requires action description")
-            er = _get_ethical()
-            result = er.evaluate_action(action_desc)
-            return _ok(vars(result) if hasattr(result, '__dict__') else result)
+            return _ok(_get_ethical().evaluate_action(action_desc))
 
         # ── AGI: chimera_embodied ───────────────────────────────────────────
-        elif name == "chimera_embodied" and _OPENCHIMERA_LOADED:
-            return _ok({
-                "note": "EmbodiedInteraction module available. Initialize with hardware context for full functionality.",
-                "available": _OPENCHIMERA_LOADED,
-            })
+        elif name == "chimera_embodied":
+            return _ok({"note": "EmbodiedInteraction stub — implement sensor/actuator bindings to activate.",
+                        "status": "stub"})
 
         # ── AGI: chimera_social ────────────────────────────────────────────
-        elif name == "chimera_social" and _OPENCHIMERA_LOADED:
-            return _ok({
-                "note": "SocialCognition module available. Initialize with interaction history for relationship tracking.",
-                "available": _OPENCHIMERA_LOADED,
-            })
+        elif name == "chimera_social":
+            return _ok({"note": "SocialCognition stub — initialize with interaction history for relationship tracking.",
+                        "status": "stub"})
 
         # ── AGI: chimera_transfer_learn ──────────────────────────────────────
-        elif name == "chimera_transfer_learn" and _OPENCHIMERA_LOADED:
-            return _ok({
-                "note": "TransferLearning module available. Apply learned representations across domains.",
-                "available": _OPENCHIMERA_LOADED,
-            })
+        elif name == "chimera_transfer_learn":
+            return _ok({"note": "TransferLearning stub — bind domain adapters to activate cross-domain transfer.",
+                        "status": "stub"})
 
         # ── AGI: chimera_evolve ──────────────────────────────────────────────
-        elif name == "chimera_evolve" and _OPENCHIMERA_LOADED:
-            return _ok({
-                "note": "EvolutionEngine available. Run evolutionary optimization over problem populations.",
-                "available": _OPENCHIMERA_LOADED,
-            })
+        elif name == "chimera_evolve":
+            return _ok({"note": "EvolutionEngine stub — supply a fitness function and population to activate.",
+                        "status": "stub"})
 
         # ── AGI: chimera_self_model ──────────────────────────────────────────
-        elif name == "chimera_self_model" and _OPENCHIMERA_LOADED:
-            return _ok({
-                "note": "SelfModel module available. Maintain self-representation for capability awareness.",
-                "available": _OPENCHIMERA_LOADED,
-            })
+        elif name == "chimera_self_model":
+            action = arguments.get("action", "reflect")
+            sm     = _get_self_model()
+            if action == "update":
+                return _ok(sm.update(
+                    capability=arguments.get("capability", ""),
+                    level=arguments.get("level", "present"),
+                    evidence=arguments.get("evidence", ""),
+                ))
+            return _ok(sm.reflect())
 
         # ── AGI: chimera_knowledge ──────────────────────────────────────────
-        elif name == "chimera_knowledge" and _OPENCHIMERA_LOADED:
+        elif name == "chimera_knowledge":
             action = arguments.get("action", "search")
-            kb = _get_kb()
+            kb     = _get_kb()
             if action == "add":
-                entry = kb.add(
-                    content=arguments.get("content", ""),
-                    category=arguments.get("category", "general"),
-                    tags=arguments.get("tags", []),
-                )
+                entry = kb.add(content=arguments.get("content", ""),
+                               category=arguments.get("category", "general"),
+                               tags=arguments.get("tags", []))
                 return _ok({"added": True, "entry_id": entry.entry_id})
             elif action == "search":
-                query = arguments.get("query", "")
-                results = kb.search(query=query)
-                return _ok({"results": [vars(r) for r in results]})
+                return _ok({"results": kb.search(query=arguments.get("query", ""))})
             elif action == "list":
-                return _ok({"entries": len(kb._entries), "categories": list(set(e.category for e in kb._entries.values()))})
-            else:
-                return _ok({"entry_count": len(kb._entries)})
+                return _ok({"entries": len(kb._entries),
+                            "categories": list({e.category for e in kb._entries.values()})})
+            return _ok({"entry_count": len(kb._entries)})
 
-        # ── AGI: chimera_memory ────────────────────────────────────────────────
-        elif name == "chimera_memory" and _OPENCHIMERA_LOADED:
-            return _ok({
-                "note": "MemorySystem available from core.memory. Initialize with storage path for persistence.",
-                "available": _OPENCHIMERA_LOADED,
-            })
+        # ── AGI: chimera_memory ────────────────────────────────────────────
+        elif name == "chimera_memory":
+            action = arguments.get("action", "recall")
+            mem    = _get_memory()
+            if action == "store":
+                return _ok(mem.store(content=arguments.get("content", ""),
+                                     tags=arguments.get("tags", []),
+                                     importance=float(arguments.get("importance", 0.5))))
+            return _ok(mem.recall(query=arguments.get("query"),
+                                  limit=int(arguments.get("limit", 10))))
 
         # ── chimera_cost_estimate ──────────────────────────────────────────────
         elif name == "chimera_cost_estimate":
