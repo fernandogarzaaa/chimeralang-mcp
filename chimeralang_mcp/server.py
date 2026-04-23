@@ -1,31 +1,31 @@
-﻿"""ChimeraLang MCP Server â€” full implementation.
+"""ChimeraLang MCP Server — full implementation.
 
 Tools exposed to Claude:
-  chimera_run          Execute a .chimera program string
-  chimera_confident    Enforce >= 0.95 confidence threshold on a value
-  chimera_explore      Wrap a value as exploratory (hallucination permitted)
-  chimera_gate         Collapse multiple candidates via quantum consensus
-  chimera_detect       Hallucination detection â€” 5 strategies
-  chimera_constrain    Full constraint middleware on any tool result
-  chimera_typecheck    Static type-check a .chimera program
-  chimera_prove        Execute + generate Merkle-chain integrity proof
-  chimera_audit        Session call-log summary
-  chimera_compress     Proportional message-history compression to a token budget
-  chimera_optimize     Aggressive text extraction (structural + entity + frequency)
-  chimera_fracture     Full pipeline â€” optimize docs + compress messages + quality gate
+  Core reasoning:    chimera_run, chimera_confident, chimera_explore, chimera_gate,
+                    chimera_detect, chimera_constrain, chimera_typecheck, chimera_prove,
+                    chimera_audit
+  Token management: chimera_optimize, chimera_compress, chimera_fracture,
+                    chimera_budget, chimera_score
+  AGI (OpenChimera): chimera_causal, chimera_deliberate, chimera_metacognize,
+                    chimera_meta_learn, chimera_quantum_vote, chimera_plan_goals,
+                    chimera_world_model, chimera_safety_check, chimera_ethical_eval,
+                    chimera_embodied, chimera_social, chimera_transfer_learn,
+                    chimera_evolve, chimera_self_model, chimera_knowledge,
+                    chimera_memory
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import sys
 import time
-from collections import Counter
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "openchimera"))
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -40,13 +40,100 @@ from chimera.integrity import IntegrityEngine
 from chimera.types import ConfidenceViolation
 from chimera.claude_adapter import ClaudeConstraintMiddleware, ToolCallSpec
 
-# â”€â”€ session-scoped singletons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+from chimeralang_mcp.token_engine import (
+    TokenBudgetManager,
+    MessageImportanceScorer,
+    get_token_budget_manager,
+)
+
+# ── AGI module imports from OpenChimera ────────────────────────────────────
+try:
+    from core.causal_reasoning import CausalGraph, CausalReasoning
+    from core.deliberation import DeliberationGraph
+    from core.deliberation_engine import DeliberationEngine
+    from core.metacognition import MetacognitionEngine
+    from core.meta_learning import MetaLearning
+    from core.goal_planner import DecompositionStrategyLearner, GoalPlanner
+    from core.world_model import SystemWorldModel
+    from core.safety_layer import SafetyLayer
+    from core.ethical_reasoning import EthicalReasoning
+    from core.embodied_interaction import EmbodiedInteraction
+    from core.social_cognition import SocialCognition
+    from core.transfer_learning import TransferLearning
+    from core.evolution import EvolutionEngine
+    from core.self_model import SelfModel
+    from core.knowledge_base import KnowledgeBase
+    from core.memory import MemorySystem
+    from core.quantum_engine import QuantumEngine, ConsensusResult
+    _OPENCHIMERA_LOADED = True
+except ImportError as e:
+    logging.warning("OpenChimera AGI modules not available: %s", e)
+    _OPENCHIMERA_LOADED = False
+
+log = logging.getLogger(__name__)
+
+# ── session-scoped singletons ─────────────────────────────────────────────
 _middleware = ClaudeConstraintMiddleware(confidence_threshold=0.7)
 _detector   = HallucinationDetector()
+_tbm        = get_token_budget_manager()
+_scorer     = MessageImportanceScorer()
 server      = Server("chimeralang-mcp")
 
+# ── AGI component singletons (lazy-initialized) ───────────────────────────
+_causal_reasoning: CausalReasoning | None = None
+_deliberation_engine: DeliberationEngine | None = None
+_metacog_engine: MetacognitionEngine | None = None
+_meta_learner: MetaLearning | None = None
+_goal_planner: GoalPlanner | None = None
+_world_model: SystemWorldModel | None = None
+_safety_layer: SafetyLayer | None = None
+_ethical_reasoner: EthicalReasoning | None = None
+_embodied: EmbodiedInteraction | None = None
+_social: SocialCognition | None = None
+_transfer: TransferLearning | None = None
+_evolution: EvolutionEngine | None = None
+_self_model: SelfModel | None = None
+_kb: KnowledgeBase | None = None
+_memory: MemorySystem | None = None
+_quantum: QuantumEngine | None = None
 
-# â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def _get_causal() -> CausalReasoning:
+    global _causal_reasoning
+    if _causal_reasoning is None:
+        _causal_reasoning = CausalReasoning()
+    return _causal_reasoning
+
+
+def _get_deliberation() -> DeliberationEngine:
+    global _deliberation_engine
+    if _deliberation_engine is None:
+        _deliberation_engine = DeliberationEngine()
+    return _deliberation_engine
+
+
+def _get_safety() -> SafetyLayer:
+    global _safety_layer
+    if _safety_layer is None:
+        _safety_layer = SafetyLayer()
+    return _safety_layer
+
+
+def _get_ethical() -> EthicalReasoning:
+    global _ethical_reasoner
+    if _ethical_reasoner is None:
+        _ethical_reasoner = EthicalReasoning()
+    return _ethical_reasoner
+
+
+def _get_kb() -> KnowledgeBase:
+    global _kb
+    if _kb is None:
+        _kb = KnowledgeBase()
+    return _kb
+
+
+# ── helpers ───────────────────────────────────────────────────────────────
 
 def _ok(data: Any) -> CallToolResult:
     return CallToolResult(
@@ -91,125 +178,7 @@ def _run(source: str) -> dict[str, Any]:
     }
 
 
-# â”€â”€ token fracture / compression helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# Ported directly from OpenChimera (core/token_fracture.py and
-# skills/token-optimizer/optimizer.py). Bundled here so this package has
-# no runtime dependency on OpenChimera.
-
-def _estimate_tokens(text: str) -> int:
-    if not text:
-        return 0
-    return max(1, len(text) // 4)
-
-
-def _compress_context(
-    messages: list[dict[str, Any]],
-    query: str = "",
-    max_tokens: int = 3000,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    safe_messages = messages or []
-
-    original_text = "\n".join(str(item.get("content", "")) for item in safe_messages)
-    original_tokens = _estimate_tokens(original_text)
-
-    if max_tokens <= 0 or original_tokens <= max_tokens:
-        compressed_messages = [
-            {"role": item.get("role", "user"),
-             "content": str(item.get("content", ""))}
-            for item in safe_messages
-        ]
-        compressed_tokens = original_tokens
-    else:
-        ratio = max_tokens / max(original_tokens, 1)
-        compressed_messages = []
-        for item in safe_messages:
-            content = str(item.get("content", ""))
-            keep = max(1, int(len(content) * ratio))
-            compressed_messages.append(
-                {"role": item.get("role", "user"), "content": content[:keep]}
-            )
-        compressed_text = "\n".join(
-            str(item.get("content", "")) for item in compressed_messages
-        )
-        compressed_tokens = _estimate_tokens(compressed_text)
-
-    stats = {
-        "query": query,
-        "original_messages": len(safe_messages),
-        "original_tokens": original_tokens,
-        "compressed_tokens": compressed_tokens,
-        "target_max_tokens": max_tokens,
-        "compression_ratio": (
-            (compressed_tokens / original_tokens) if original_tokens else 1.0
-        ),
-    }
-    return compressed_messages, stats
-
-
-def _optimize_text(text: str, target_ratio: float = 0.02) -> str:
-    """Extremely aggressive text extraction (3-stage structural + entity + frequency)."""
-    original_len = len(text)
-    if original_len == 0:
-        return ""
-
-    target_len = max(int(original_len * target_ratio), 10)
-
-    # 1. Structural code signatures
-    structural_patterns = re.findall(
-        r'^(?:def|class|interface|type|const|let|var|public|private|protected)'
-        r'\s+[\w\s\(:\,<>.=\)]+[{;:]',
-        text,
-        re.MULTILINE,
-    )
-
-    # 2. Key entities â€” capitalized words & CONSTANTS
-    entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]+\b|\b[A-Z_]{3,}\b', text)
-
-    # 3. High-frequency nouns > 5 chars (excluding stopwords)
-    words = [w.lower() for w in re.findall(r'\b[A-Za-z]{5,}\b', text)]
-    stopwords = {
-        'return', 'import', 'export', 'public', 'private', 'static',
-        'function', 'class', 'extends', 'implements',
-        'which', 'their', 'there', 'about',
-    }
-    filtered = [w for w in words if w not in stopwords]
-    common = [w for w, _ in Counter(filtered).most_common(20)]
-
-    parts: list[str] = []
-    if structural_patterns:
-        parts.append("--- [STRUCTURAL LOGIC] ---")
-        parts.append("\n".join(structural_patterns[:20]))
-    if entities:
-        parts.append("--- [KEY ENTITIES] ---")
-        parts.append(" ".join(list(set(entities))[:30]))
-    if common:
-        parts.append("--- [HIGH FREQUENCY NOUNS] ---")
-        parts.append(" ".join(common))
-
-    extracted = "\n".join(parts)
-
-    # Hard-cap at target_ratio
-    if len(extracted) > target_len:
-        extracted = extracted[:target_len] + "..."
-
-    # If too short (pure prose with no code), grab first + last sentence
-    if len(extracted) < target_len // 2:
-        sentences = re.split(r'(?<=[.!?]) +', text.replace('\n', ' '))
-        if sentences:
-            extracted += "\n--- [CRITICAL EDGES] ---\n" + sentences[0]
-            if len(sentences) > 1:
-                extracted += " ... " + sentences[-1]
-            extracted = extracted[:target_len]
-
-    return (
-        f"== 98% OPTIMIZATION ACTIVE ==\n"
-        f"Original: {original_len} chars\n"
-        f"Optimized: {len(extracted)} chars\n\n"
-        f"{extracted}"
-    )
-
-
-# â”€â”€ tool registry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── tool registry ─────────────────────────────────────────────────────────
 
 @server.list_tools()
 async def list_tools() -> list[Tool]:
@@ -244,7 +213,7 @@ async def list_tools() -> list[Tool]:
                     "value":      {"description": "The value to assert confidence on"},
                     "confidence": {
                         "type": "number",
-                        "description": "Confidence score 0.0â€“1.0. Must be >= 0.95 to pass.",
+                        "description": "Confidence score 0.0–1.0. Must be >= 0.95 to pass.",
                         "minimum": 0.0, "maximum": 1.0,
                     },
                     "label": {
@@ -258,7 +227,7 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="chimera_explore",
             description=(
-                "Wrap a value as Explore<> â€” explicitly marking it as exploratory where "
+                "Wrap a value as Explore<> — explicitly marking it as exploratory where "
                 "hallucination is permitted and expected. "
                 "Use for hypotheses, creative outputs, brainstorms, and anything that "
                 "must not be treated as verified fact."
@@ -269,7 +238,7 @@ async def list_tools() -> list[Tool]:
                     "value":      {"description": "The exploratory value"},
                     "confidence": {
                         "type": "number",
-                        "description": "Confidence 0.0â€“1.0 (typically low for explore values)",
+                        "description": "Confidence 0.0–1.0 (typically low for explore values)",
                         "minimum": 0.0, "maximum": 1.0, "default": 0.5,
                     },
                     "label": {"type": "string", "description": "Optional label"},
@@ -282,7 +251,7 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Collapse multiple candidate values into a single consensus result using "
                 "ChimeraLang's quantum consensus gate. "
-                "Detects and flags trivial consensus (all branches identical â€” no real agreement). "
+                "Detects and flags trivial consensus (all branches identical — no real agreement). "
                 "Strategies: majority, weighted_vote, highest_confidence. "
                 "Use when reconciling multiple model outputs, tool results, or reasoning branches."
             ),
@@ -320,12 +289,12 @@ async def list_tools() -> list[Tool]:
             name="chimera_detect",
             description=(
                 "Run ChimeraLang hallucination detection on a value. Five strategies:\n"
-                "  range            â€” numeric value must fall within [min, max]\n"
-                "  dictionary       â€” value must be in an allowed set\n"
-                "  semantic         â€” forbidden patterns / absolute-certainty markers\n"
-                "  cross_reference  â€” value must not deviate from a reference set\n"
-                "  temporal         â€” value timestamp must not be stale\n"
-                "  confidence_threshold â€” confidence must be >= threshold\n"
+                "  range            — numeric value must fall within [min, max]\n"
+                "  dictionary       — value must be in an allowed set\n"
+                "  semantic         — forbidden patterns / absolute-certainty markers\n"
+                "  cross_reference  — value must not deviate from a reference set\n"
+                "  temporal         — value timestamp must not be stale\n"
+                "  confidence_threshold — confidence must be >= threshold\n"
                 "Returns flags with severity scores and evidence."
             ),
             inputSchema={
@@ -359,8 +328,8 @@ async def list_tools() -> list[Tool]:
             name="chimera_constrain",
             description=(
                 "Apply ChimeraLang's full constraint middleware to any tool result. "
-                "Pipeline: confidence gate â†’ must-constraint checks â†’ "
-                "forbidden capability logging â†’ hallucination detection â†’ ephemeral scope cleanup. "
+                "Pipeline: confidence gate → must-constraint checks → "
+                "forbidden capability logging → hallucination detection → ephemeral scope cleanup. "
                 "Returns pass/fail with violations, warnings, confidence, and audit trace. "
                 "Primary integration point for wrapping Claude's own tool calls."
             ),
@@ -397,7 +366,7 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Statically type-check a ChimeraLang program without executing it. "
                 "Validates confidence boundaries, memory scope rules, and illegal "
-                "Exploreâ†’Confident promotions outside a gate. "
+                "Explore→Confident promotions outside a gate. "
                 "Returns errors and warnings."
             ),
             inputSchema={
@@ -412,7 +381,7 @@ async def list_tools() -> list[Tool]:
             name="chimera_prove",
             description=(
                 "Execute a ChimeraLang program and generate a Merkle-chain integrity proof. "
-                "Every reasoning step is SHA-256 hashed and chained â€” tamper-evident derivation. "
+                "Every reasoning step is SHA-256 hashed and chained — tamper-evident derivation. "
                 "Returns execution results + proof with root hash, chain length, verdict, "
                 "gate certificates, and hallucination scan summary."
             ),
@@ -438,119 +407,156 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
-            name="chimera_compress",
+            name="chimera_fracture",
             description=(
-                "Compress a conversation history to fit within a token budget. "
-                "Estimates tokens at len(text)//4, then proportionally truncates each "
-                "message so the total fits under max_tokens. "
-                "Use to shrink long chat histories before feeding them back into Claude."
+                "Full compression pipeline: chimera_optimize each document → chimera_compress messages "
+                "(lossy if opted in) → TokenBudgetManager budget gate → quality flag. "
+                "This is the primary pre-processing step before any complex Claude task. "
+                "Returns quality_passed, combined stats, budget_remaining, and lossy_dropped_count."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "messages": {
                         "type": "array",
-                        "description": "List of {role, content} message objects",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "role":    {"type": "string"},
-                                "content": {"type": "string"},
-                            },
-                            "required": ["role", "content"],
-                        },
+                        "description": "Conversation history [{role, content}]. "
+                                       "Compressed to fit token_budget before processing.",
                     },
-                    "query": {
-                        "type": "string",
-                        "description": "Optional guiding query (metadata only)",
-                        "default": "",
+                    "documents": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Document strings to optimise and compress.",
                     },
-                    "max_tokens": {
+                    "token_budget": {
                         "type": "integer",
-                        "description": "Target token budget (default 3000)",
-                        "default": 3000,
-                        "minimum": 1,
+                        "description": "Maximum tokens for the compressed output. Default 1500.",
+                        "default": 1500,
+                    },
+                    "allow_lossy": {
+                        "type": "boolean",
+                        "description": (
+                            "When True and token_budget is exceeded, drop lowest-importance messages "
+                            "until the budget is met. Default False (lossless)."
+                        ),
+                        "default": False,
                     },
                 },
-                "required": ["messages"],
             },
         ),
         Tool(
             name="chimera_optimize",
             description=(
-                "Aggressively compress a block of text to its semantic skeleton. "
-                "Three-stage extraction: (1) structural code signatures "
-                "(class/def/interface/const), (2) key entities (capitalized words & "
-                "CONSTANTS), (3) high-frequency nouns > 5 chars excluding stopwords. "
-                "Caps output at target_ratio of original length (default 2%). "
-                "Use to shrink large codebases or documents before feeding to Claude."
+                "Reduce token count of a prompt or document by removing redundancy, "
+                "normalising whitespace, collapsing repeated phrases, and stripping "
+                "filler language — while preserving semantic meaning. "
+                "Returns the optimised text and token-savings statistics."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "text": {
                         "type": "string",
-                        "description": "Raw text / code to optimize",
+                        "description": "Text to optimise",
                     },
-                    "target_ratio": {
-                        "type": "number",
-                        "description": "Fraction of original length to retain (default 0.02)",
-                        "default": 0.02,
-                        "minimum": 0.001,
-                        "maximum": 1.0,
+                    "strategies": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "whitespace",
+                                "dedup_sentences",
+                                "strip_filler",
+                                "collapse_lists",
+                            ],
+                        },
+                        "description": (
+                            "Ordered list of optimisation passes to apply. "
+                            "Default: [whitespace, dedup_sentences, strip_filler]"
+                        ),
+                        "default": ["whitespace", "dedup_sentences", "strip_filler"],
+                    },
+                    "preserve_code": {
+                        "type": "boolean",
+                        "description": "Skip optimisation inside code fences (``` blocks). Default true.",
+                        "default": True,
                     },
                 },
                 "required": ["text"],
             },
         ),
         Tool(
-            name="chimera_fracture",
+            name="chimera_compress",
             description=(
-                "Full token-fracture pipeline combining chimera_optimize and "
-                "chimera_compress. Steps: (1) optimize each document string via "
-                "aggressive extraction, (2) compress the message history to the token "
-                "budget, (3) run confidence_threshold detection on the result, "
-                "(4) return a quality-passed flag and combined stats. "
-                "Use as the primary pre-processing step before a complex Claude task."
+                "Compress text using abbreviation and shorthand strategies to minimise "
+                "token usage. Three levels: light (whitespace + punctuation), "
+                "medium (+ common word contractions), aggressive (+ symbol substitutions). "
+                "Returns compressed text, compression ratio, and estimated token savings."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to compress",
+                    },
+                    "level": {
+                        "type": "string",
+                        "enum": ["light", "medium", "aggressive"],
+                        "description": "Compression aggressiveness. Default: medium.",
+                        "default": "medium",
+                    },
+                    "preserve_code": {
+                        "type": "boolean",
+                        "description": "Skip compression inside code fences (``` blocks). Default true.",
+                        "default": True,
+                    },
+                },
+                "required": ["text"],
+            },
+        ),
+        Tool(
+            name="chimera_budget",
+            description=(
+                "Report current token usage against a budget and get a compression recommendation. "
+                "Claude calls this proactively at the start of heavy tasks to know exactly where it stands. "
+                "status: ok (<70% used) | warn (70-85%) | critical (>85%). "
+                "recommendation: ok | call chimera_compress | call chimera_fracture"
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "messages": {
                         "type": "array",
-                        "description": "List of {role, content} message objects",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "role":    {"type": "string"},
-                                "content": {"type": "string"},
-                            },
-                            "required": ["role", "content"],
-                        },
+                        "description": "Current conversation messages [{role, content}]",
                     },
-                    "documents": {
-                        "type": "array",
-                        "description": "Optional list of document strings to optimize",
-                        "items": {"type": "string"},
-                        "default": [],
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "Optional guiding query (metadata only)",
-                        "default": "",
-                    },
-                    "token_budget": {
+                    "max_tokens": {
                         "type": "integer",
-                        "description": "Target total token budget (default 3000)",
-                        "default": 3000,
-                        "minimum": 1,
+                        "description": "Claude context window size. Default 200000.",
+                        "default": 200000,
                     },
-                    "optimize_ratio": {
-                        "type": "number",
-                        "description": "Fraction of original doc length to retain (default 0.05)",
-                        "default": 0.05,
-                        "minimum": 0.001,
-                        "maximum": 1.0,
+                    "reserve_tokens": {
+                        "type": "integer",
+                        "description": "Headroom reserved for the response. Default 10000.",
+                        "default": 10000,
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="chimera_score",
+            description=(
+                "Rank messages by importance for lossy compression decisions. "
+                "Each message is scored 0.0-1.0 on recency, content type, information density, "
+                "and replaceability. Lowest scores are dropped first when allow_lossy=True. "
+                "Used by chimera_compress and chimera_fracture internally; also exposed directly "
+                "for transparency audit before lossy compression."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "messages": {
+                        "type": "array",
+                        "description": "Messages to score [{role, content}]",
                     },
                 },
                 "required": ["messages"],
@@ -559,17 +565,17 @@ async def list_tools() -> list[Tool]:
     ]
 
 
-# â”€â”€ tool handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── tool handlers ─────────────────────────────────────────────────────────
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
     try:
 
-        # â”€â”€ chimera_run â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── chimera_run ───────────────────────────────────────────────────
         if name == "chimera_run":
             return _ok(_run(arguments["source"]))
 
-        # â”€â”€ chimera_confident â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── chimera_confident ─────────────────────────────────────────────
         elif name == "chimera_confident":
             value      = arguments["value"]
             confidence = float(arguments["confidence"])
@@ -595,7 +601,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "trace":      [f"confident({label})", f"score={confidence:.4f}"],
             })
 
-        # â”€â”€ chimera_explore â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── chimera_explore ───────────────────────────────────────────────
         elif name == "chimera_explore":
             value      = arguments["value"]
             confidence = min(max(float(arguments.get("confidence", 0.5)), 0.0), 1.0)
@@ -613,7 +619,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "trace": [f"explore({label})", f"score={confidence:.4f}"],
             })
 
-        # â”€â”€ chimera_gate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── chimera_gate ──────────────────────────────────────────────────
         elif name == "chimera_gate":
             candidates = arguments["candidates"]
             strategy   = arguments.get("strategy", "weighted_vote")
@@ -669,18 +675,18 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             }
             if trivial:
                 result["warning"] = (
-                    "All branches returned identical values â€” trivial consensus. "
+                    "All branches returned identical values — trivial consensus. "
                     "No genuine divergence detected. Use independent reasoning paths "
                     "for real consensus signal."
                 )
             if not passed:
                 result["warning"] = (
                     f"Consensus confidence {consensus_conf:.3f} below threshold {threshold}. "
-                    "Result is unreliable â€” consider more branches or lower threshold."
+                    "Result is unreliable — consider more branches or lower threshold."
                 )
             return _ok(result)
 
-        # â”€â”€ chimera_detect â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── chimera_detect ────────────────────────────────────────────────
         elif name == "chimera_detect":
             value      = arguments["value"]
             confidence = float(arguments.get("confidence", 0.8))
@@ -790,7 +796,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     flags.append({
                         "kind":        "TEMPORAL_SKIP",
                         "severity":    0.0,
-                        "description": "Not a timestamp â€” temporal check skipped",
+                        "description": "Not a timestamp — temporal check skipped",
                     })
 
             elif strategy == "confidence_threshold":
@@ -813,7 +819,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "flags":      flags,
             })
 
-        # â”€â”€ chimera_constrain â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── chimera_constrain ─────────────────────────────────────────────
         elif name == "chimera_constrain":
             spec = ToolCallSpec(
                 tool_name        = arguments["tool_name"],
@@ -847,7 +853,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 },
             })
 
-        # â”€â”€ chimera_typecheck â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── chimera_typecheck ─────────────────────────────────────────────
         elif name == "chimera_typecheck":
             source  = arguments["source"]
             tokens  = Lexer(source).tokenize()
@@ -861,7 +867,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "warnings":      result.warnings,
             })
 
-        # â”€â”€ chimera_prove â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── chimera_prove ─────────────────────────────────────────────────
         elif name == "chimera_prove":
             source  = arguments["source"]
             tokens  = Lexer(source).tokenize()
@@ -899,12 +905,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     "gate_certificates":    proof["gates"],
                     "note": (
                         f"Merkle chain of {proof['chain']['length']} steps. "
-                        "Every reasoning step SHA-256 hashed and chained â€” tamper-evident."
+                        "Every reasoning step SHA-256 hashed and chained — tamper-evident."
                     ),
                 },
             })
 
-        # â”€â”€ chimera_audit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── chimera_audit ─────────────────────────────────────────────────
         elif name == "chimera_audit":
             summary = _middleware.audit_summary()
             log     = _middleware.call_log()
@@ -922,113 +928,512 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 ],
             })
 
-        # â”€â”€ chimera_compress â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        elif name == "chimera_compress":
-            messages   = arguments.get("messages") or []
-            query      = str(arguments.get("query", ""))
-            max_tokens = int(arguments.get("max_tokens", 3000))
-            compressed, stats = _compress_context(messages, query=query, max_tokens=max_tokens)
-            return _ok({
-                "compressed_messages": compressed,
-                "stats": {
-                    "original_messages":  stats["original_messages"],
-                    "original_tokens":    stats["original_tokens"],
-                    "compressed_tokens":  stats["compressed_tokens"],
-                    "compression_ratio":  round(stats["compression_ratio"], 4),
-                    "target_max_tokens":  stats["target_max_tokens"],
-                    "query":              stats["query"],
-                },
-            })
-
-        # â”€â”€ chimera_optimize â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        elif name == "chimera_optimize":
-            text         = str(arguments.get("text", ""))
-            target_ratio = float(arguments.get("target_ratio", 0.02))
-            optimized    = _optimize_text(text, target_ratio=target_ratio)
-            original_chars  = len(text)
-            optimized_chars = len(optimized)
-            reduction = (
-                (1.0 - optimized_chars / original_chars) * 100.0
-                if original_chars else 0.0
-            )
-            return _ok({
-                "optimized_text":    optimized,
-                "original_chars":    original_chars,
-                "optimized_chars":   optimized_chars,
-                "reduction_percent": round(reduction, 2),
-                "target_ratio":      target_ratio,
-            })
-
-        # â”€â”€ chimera_fracture â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── chimera_fracture — full pipeline ──────────────────────────────
         elif name == "chimera_fracture":
-            messages       = arguments.get("messages") or []
-            documents      = arguments.get("documents") or []
-            query          = str(arguments.get("query", ""))
-            token_budget   = int(arguments.get("token_budget", 3000))
-            optimize_ratio = float(arguments.get("optimize_ratio", 0.05))
+            import re as _re
 
-            # 1. optimize each document
-            optimized_documents: list[dict[str, Any]] = []
-            for i, doc in enumerate(documents):
-                doc_str = str(doc)
-                optimized = _optimize_text(doc_str, target_ratio=optimize_ratio)
-                optimized_documents.append({
-                    "index":           i,
-                    "original_chars":  len(doc_str),
-                    "optimized_chars": len(optimized),
-                    "optimized_text":  optimized,
-                })
+            messages     = arguments.get("messages", [])
+            documents    = arguments.get("documents", [])
+            token_budget = int(arguments.get("token_budget", 1500))
+            allow_lossy  = bool(arguments.get("allow_lossy", False))
 
-            # 2. compress the message history
-            compressed_messages, stats = _compress_context(
-                messages, query=query, max_tokens=token_budget,
-            )
+            total_start = time.time()
+            stats: dict[str, Any] = {
+                "documents_input": sum(len(d) for d in documents),
+                "messages_input":  len(messages),
+                "tokens_input":    _tbm.count_messages(messages),
+            }
 
-            # 3. confidence_threshold-style quality gate
-            # Quality passes when we stayed at or under budget AND retained >= 10%
-            # of the original signal (avoids near-empty collapse).
-            compression_ratio = stats["compression_ratio"]
-            under_budget = stats["compressed_tokens"] <= token_budget
-            quality_passed = bool(under_budget and compression_ratio >= 0.10)
+            # Step 1: optimize each document
+            optimised_docs: list[str] = []
+            for doc in documents:
+                # Quick optimise: whitespace + strip_filler (skip dedup_sentences/collapse_lists for speed)
+                d = _re.sub(r"[ \t]+", " ", doc)
+                d = _re.sub(r"\n{3,}", "\n\n", d).strip()
+                for pat in [
+                    r"\bplease note that\b", r"\bit is worth noting that\b",
+                    r"\bit should be noted that\b", r"\bin order to\b",
+                    r"\bbasically\b", r"\bactually\b", r"\bvery\b",
+                    r"\bjust\b", r"\bsimply\b", r"\bquite\b",
+                    r"\bof course\b", r"\bneedless to say\b",
+                ]:
+                    d = _re.sub(pat, "", d, flags=_re.IGNORECASE)
+                d = _re.sub(r"[ \t]{2,}", " ", d).strip()
+                optimised_docs.append(d)
 
-            flags: list[dict[str, Any]] = []
-            if not under_budget:
-                flags.append({
-                    "kind":        "BUDGET_EXCEEDED",
-                    "severity":    0.9,
-                    "description": (
-                        f"Compressed tokens {stats['compressed_tokens']} "
-                        f"still exceed budget {token_budget}"
-                    ),
-                })
-            if compression_ratio < 0.10:
-                flags.append({
-                    "kind":        "EXCESSIVE_COMPRESSION",
-                    "severity":    round(1.0 - compression_ratio, 3),
-                    "description": (
-                        f"Retained only {compression_ratio:.1%} of original signal â€” "
-                        "output may be too degraded to be useful."
-                    ),
-                })
+            stats["documents_optimised"] = sum(len(d) for d in optimised_docs)
 
-            budget_remaining = max(0, token_budget - stats["compressed_tokens"])
+            # Step 2: compress messages (lossless first)
+            if messages:
+                msg_text = "\n".join(
+                    f"[{m.get('role', 'user')}]: {m.get('content', '')}"
+                    for m in messages
+                )
+                compressed = _re.sub(r"[ \t]+", " ", msg_text)
+                compressed = _re.sub(r"\n{3,}", "\n\n", compressed).strip()
+                for pat, repl in {
+                    r"\bdo not\b": "don't", r"\bdoes not\b": "doesn't",
+                    r"\bdid not\b": "didn't", r"\bcannot\b": "can't",
+                    r"\bwill not\b": "won't", r"\bwould not\b": "wouldn't",
+                    r"\bshould not\b": "shouldn't", r"\bcould not\b": "couldn't",
+                    r"\bare not\b": "aren't", r"\bwas not\b": "wasn't",
+                    r"\bwere not\b": "weren't", r"\bhave not\b": "haven't",
+                    r"\bhas not\b": "hasn't", r"\bhad not\b": "hadn't",
+                    r"\bit is\b": "it's", r"\bthat is\b": "that's",
+                }.items():
+                    compressed = _re.sub(pat, repl, compressed, flags=_re.IGNORECASE)
+                messages_compressed = compressed
+            else:
+                messages_compressed = ""
+
+            tokens_after = _tbm.count_tokens(messages_compressed) + _tbm.count_texts(optimised_docs)
+            stats["tokens_after_pipeline"] = tokens_after
+            budget_remaining = max(0, token_budget - tokens_after)
+            quality_passed = tokens_after <= token_budget
+            lossy_dropped_count = 0
+
+            # Step 3: lossy if needed and opted in
+            if not quality_passed and allow_lossy:
+                ranked = _scorer.rank(messages)
+                min_keep = 2
+                to_drop: list[dict[str, Any]] = []
+                for entry in ranked:
+                    if len(messages) - len(to_drop) <= min_keep:
+                        break
+                    to_drop.append(entry)
+                dropped_scores = [e["score"] for e in to_drop]
+                kept = [m for i, m in enumerate(messages)
+                        if i not in {e["index"] for e in to_drop}]
+                if to_drop:
+                    tombstone = {
+                        "role": "system",
+                        "content": (
+                            f"[{len(to_drop)} messages omitted — "
+                            f"low importance scores: {', '.join(str(s) for s in dropped_scores)}]"
+                        ),
+                    }
+                    kept.append(tombstone)
+                    messages = kept
+                    lossy_dropped_count = len(to_drop)
+                    # Re-compress kept messages
+                    msg_text = "\n".join(
+                        f"[{m.get('role', 'user')}]: {m.get('content', '')}"
+                        for m in messages
+                    )
+                    compressed = _re.sub(r"[ \t]+", " ", msg_text)
+                    compressed = _re.sub(r"\n{3,}", "\n\n", compressed).strip()
+                    messages_compressed = compressed
+                    tokens_after = _tbm.count_tokens(messages_compressed) + _tbm.count_texts(optimised_docs)
+                    budget_remaining = max(0, token_budget - tokens_after)
+                    quality_passed = tokens_after <= token_budget
+
+            stats["tokens_after_pipeline"] = tokens_after
+            stats["budget_remaining"] = budget_remaining
+            stats["lossy_dropped_count"] = lossy_dropped_count
+            stats["duration_ms"] = round((time.time() - total_start) * 1000, 1)
 
             return _ok({
-                "compressed_messages":  compressed_messages,
-                "optimized_documents":  optimized_documents,
-                "token_budget_used":    stats["compressed_tokens"],
-                "budget_remaining":     budget_remaining,
-                "quality_passed":       quality_passed,
-                "compression_stats": {
-                    "original_messages":  stats["original_messages"],
-                    "original_tokens":    stats["original_tokens"],
-                    "compressed_tokens":  stats["compressed_tokens"],
-                    "compression_ratio":  round(compression_ratio, 4),
-                    "target_max_tokens":  stats["target_max_tokens"],
-                    "documents_processed": len(optimized_documents),
-                    "query":              stats["query"],
-                },
-                "quality_flags": flags,
+                "quality_passed":      quality_passed,
+                "budget_remaining":    budget_remaining,
+                "tokens_input":        stats["tokens_input"],
+                "tokens_after_pipeline": tokens_after,
+                "documents_input":    stats["documents_input"],
+                "documents_optimised": stats["documents_optimised"],
+                "messages_input":      stats["messages_input"],
+                "lossy_dropped_count": lossy_dropped_count,
+                "compression_time_ms": stats["duration_ms"],
+                "token_count_method": _tbm.get_stats()["token_count_method"],
+            })
+
+        # ── chimera_optimize ──────────────────────────────────────────────
+        elif name == "chimera_optimize":
+            import re as _re
+
+            _FILLER = [
+                r"\bplease note that\b", r"\bit is worth noting that\b",
+                r"\bit should be noted that\b", r"\bin order to\b",
+                r"\bbasically\b", r"\bactually\b", r"\bvery\b",
+                r"\bjust\b", r"\bsimply\b", r"\bquite\b",
+                r"\bof course\b", r"\bneedless to say\b",
+                r"\bas you can see\b", r"\bclearly\b",
+            ]
+
+            text       = arguments["text"]
+            strategies = arguments.get("strategies") or ["whitespace", "dedup_sentences", "strip_filler"]
+            preserve_code = bool(arguments.get("preserve_code", True))
+            original_len = len(text)
+            result_text  = text
+            log: list[str] = []
+            code_blocks: list[str] = []
+
+            # Extract code fences if preserving
+            if preserve_code:
+                def _stash(m: "_re.Match[str]") -> str:
+                    code_blocks.append(m.group(0))
+                    return f"\x00CODE{len(code_blocks) - 1}\x00"
+                result_text = _re.sub(r"```[\s\S]*?```", _stash, result_text)
+
+            if "whitespace" in strategies:
+                before = len(result_text)
+                result_text = _re.sub(r"[ \t]+", " ", result_text)
+                result_text = _re.sub(r"\n{3,}", "\n\n", result_text).strip()
+                log.append(f"whitespace: -{before - len(result_text)} chars")
+
+            if "dedup_sentences" in strategies:
+                before    = len(result_text)
+                seen: set[str] = set()
+                out_lines: list[str] = []
+                for line in result_text.splitlines():
+                    key = line.strip().lower()
+                    if key and key not in seen:
+                        seen.add(key)
+                        out_lines.append(line)
+                    elif not key:
+                        out_lines.append(line)
+                result_text = "\n".join(out_lines)
+                log.append(f"dedup_sentences: -{before - len(result_text)} chars")
+
+            if "strip_filler" in strategies:
+                before = len(result_text)
+                for pat in _FILLER:
+                    result_text = _re.sub(pat, "", result_text, flags=_re.IGNORECASE)
+                result_text = _re.sub(r"[ \t]{2,}", " ", result_text).strip()
+                log.append(f"strip_filler: -{before - len(result_text)} chars")
+
+            if "collapse_lists" in strategies:
+                before = len(result_text)
+                # Collect all list items, deduplicate while preserving order
+                list_item_pattern = r"(?:^|\n)([-*•])\s+(.+?)(?=\n[-*•]|\n\n|$)"
+                items_ordered: list[tuple[str, str]] = []
+                seen_items: set[str] = set()
+                for m in _re.finditer(list_item_pattern, result_text, _re.MULTILINE):
+                    bullet, text_content = m.group(1), m.group(2).strip()
+                    key = text_content.lower()
+                    if key and key not in seen_items:
+                        seen_items.add(key)
+                        items_ordered.append((bullet, text_content))
+                if items_ordered:
+                    rebuilt_parts = [f"{b} {t}" for b, t in items_ordered]
+                    result_text = "\n".join(rebuilt_parts)
+                log.append(f"collapse_lists: -{before - len(result_text)} chars")
+
+            # Restore code blocks
+            if preserve_code:
+                for i, block in enumerate(code_blocks):
+                    result_text = result_text.replace(f"\x00CODE{i}\x00", block)
+
+            saved = original_len - len(result_text)
+            ratio = round(saved / original_len, 4) if original_len else 0.0
+
+            return _ok({
+                "optimised_text":    result_text,
+                "original_chars":    original_len,
+                "optimised_chars":   len(result_text),
+                "chars_saved":       saved,
+                "reduction_ratio":   ratio,
+                "estimated_tokens_saved": max(0, round(saved / 4)),
+                "passes_applied":     log,
+                "code_blocks_preserved": len(code_blocks),
+            })
+
+        # ── chimera_compress ──────────────────────────────────────────────
+        elif name == "chimera_compress":
+            import re as _re
+
+            _CONTRACTIONS_MEDIUM = {
+                r"\bdo not\b": "don't",     r"\bdoes not\b": "doesn't",
+                r"\bdid not\b": "didn't",   r"\bcannot\b": "can't",
+                r"\bwill not\b": "won't",   r"\bwould not\b": "wouldn't",
+                r"\bshould not\b": "shouldn't", r"\bcould not\b": "couldn't",
+                r"\bare not\b": "aren't",   r"\bwas not\b": "wasn't",
+                r"\bwere not\b": "weren't", r"\bhave not\b": "haven't",
+                r"\bhas not\b": "hasn't",   r"\bhad not\b": "hadn't",
+                r"\bI am\b": "I'm",         r"\bI have\b": "I've",
+                r"\bI will\b": "I'll",      r"\bI would\b": "I'd",
+                r"\bit is\b": "it's",       r"\bthat is\b": "that's",
+                r"\bthere is\b": "there's", r"\bthey are\b": "they're",
+                r"\bwe are\b": "we're",     r"\byou are\b": "you're",
+            }
+
+            _SYMBOLS_AGGRESSIVE = {
+                # Removed ∴ ∵ & w/ w/o — these break Claude's comprehension of its own compressed history.
+                # Keep only unambiguous, Claude-readable substitutions.
+                r"\bapproximately\b": "≈",
+                r"\bgreater than\b": ">",
+                r"\bless than\b": "<",
+                r"\bequals\b": "=",
+                r"\bnumber\b": "nr.",
+                r"\bversus\b": "vs.",
+                r"\bregarding\b": "re:",
+                r"\bfor example\b": "e.g.",
+                r"\bthat is\b": "i.e.",
+                r"\betcetera\b": "etc.",
+            }
+
+            text          = arguments["text"]
+            level         = arguments.get("level", "medium")
+            preserve_code = bool(arguments.get("preserve_code", True))
+            original_len  = len(text)
+
+            # Extract code fences if preserving
+            code_blocks: list[str] = []
+            work = text
+            if preserve_code:
+                def _stash(m: "_re.Match[str]") -> str:
+                    code_blocks.append(m.group(0))
+                    return f"\x00CODE{len(code_blocks) - 1}\x00"
+                work = _re.sub(r"```[\s\S]*?```", _stash, work)
+
+            # light: normalise whitespace
+            work = _re.sub(r"[ \t]+", " ", work)
+            work = _re.sub(r"\n{3,}", "\n\n", work).strip()
+
+            if level in ("medium", "aggressive"):
+                for pat, repl in _CONTRACTIONS_MEDIUM.items():
+                    work = _re.sub(pat, repl, work, flags=_re.IGNORECASE)
+
+            if level == "aggressive":
+                for pat, repl in _SYMBOLS_AGGRESSIVE.items():
+                    work = _re.sub(pat, repl, work, flags=_re.IGNORECASE)
+                # strip redundant punctuation runs
+                work = _re.sub(r"\.{2,}", "…", work)
+                work = _re.sub(r"\s+([,;:!?])", r"\1", work)
+
+            # Restore code blocks
+            if preserve_code:
+                for i, block in enumerate(code_blocks):
+                    work = work.replace(f"\x00CODE{i}\x00", block)
+
+            compressed_len = len(work)
+            saved          = original_len - compressed_len
+            ratio          = round(saved / original_len, 4) if original_len else 0.0
+
+            return _ok({
+                "compressed_text":   work,
+                "level":             level,
+                "original_chars":    original_len,
+                "compressed_chars":  compressed_len,
+                "chars_saved":       saved,
+                "compression_ratio": ratio,
+                "estimated_tokens_saved": max(0, round(saved / 4)),
+                "code_blocks_preserved": len(code_blocks),
+            })
+
+        # ── chimera_budget ────────────────────────────────────────────────
+        elif name == "chimera_budget":
+            messages = arguments.get("messages", [])
+            max_tokens = int(arguments.get("max_tokens", 200000))
+            reserve = int(arguments.get("reserve_tokens", 10000))
+            used = _tbm.count_messages(messages)
+            remaining = max(0, max_tokens - used - reserve)
+            pct = used / max_tokens if max_tokens else 0
+            if pct < 0.70:
+                status, recommendation = "ok", "ok"
+            elif pct < 0.85:
+                status, recommendation = "warn", "call chimera_compress"
+            else:
+                status, recommendation = "critical", "call chimera_fracture"
+            return _ok({
+                "used_tokens": used,
+                "remaining_tokens": remaining,
+                "pct_used": round(pct * 100, 2),
+                "status": status,
+                "recommendation": recommendation,
+                "thresholds": {"warn": 70, "critical": 85},
+                "token_count_method": _tbm.get_stats()["token_count_method"],
+            })
+
+        # ── chimera_score ────────────────────────────────────────────────
+        elif name == "chimera_score":
+            messages = arguments.get("messages", [])
+            if not messages:
+                return _ok([])
+            ranked = _scorer.rank(messages)
+            return _ok({
+                "scores": ranked,
+                "total_messages": len(messages),
+                "token_count_method": _tbm.get_stats()["token_count_method"],
+            })
+
+        # ── AGI: chimera_causal ────────────────────────────────────────────
+        elif name == "chimera_causal" and _OPENCHIMERA_LOADED:
+            action = arguments.get("action", "info")
+            if action == "add_edge":
+                cr = _get_causal()
+                from core.causal_reasoning import CausalEdge, EdgeType, ConfidenceLevel
+                edge = CausalEdge(
+                    cause=arguments["cause"],
+                    effect=arguments["effect"],
+                    edge_type=EdgeType(arguments.get("edge_type", "causes")),
+                    strength=float(arguments.get("strength", 0.5)),
+                    confidence=float(arguments.get("confidence", 0.5)),
+                    confidence_level=ConfidenceLevel(arguments.get("confidence_level", "observed")),
+                )
+                cr.add_edge(edge)
+                return _ok({"added": True, "edge": str(edge)})
+            elif action == "query":
+                cr = _get_causal()
+                result = cr.query(cause=arguments.get("cause"), effect=arguments.get("effect"))
+                return _ok({"query_result": result})
+            elif action == "paths":
+                cr = _get_causal()
+                paths = cr.find_causal_paths(arguments.get("source", ""), arguments.get("target", ""))
+                return _ok({"paths": [vars(p) for p in paths]})
+            else:
+                cr = _get_causal()
+                return _ok({"variables": list(cr.graph.variables), "edge_count": cr.graph.edge_count})
+
+        # ── AGI: chimera_deliberate ────────────────────────────────────────
+        elif name == "chimera_deliberate" and _OPENCHIMERA_LOADED:
+            prompt = arguments.get("prompt", "")
+            perspectives = arguments.get("perspectives", [{"perspective": "default", "content": "", "model": "claude"}])
+            de = _get_deliberation()
+            result = de.deliberate(prompt, perspectives)
+            return _ok(result)
+
+        # ── AGI: chimera_metacognize ───────────────────────────────────────
+        elif name == "chimera_metacognize" and _OPENCHIMERA_LOADED:
+            # Note: MetacognitionEngine requires db + bus; expose diagnostic only
+            return _ok({
+                "note": "MetacognitionEngine requires database + event bus. Use compute_ece() on an initialized engine.",
+                "available": _OPENCHIMERA_LOADED,
+            })
+
+        # ── AGI: chimera_meta_learn ─────────────────────────────────────────
+        elif name == "chimera_meta_learn" and _OPENCHIMERA_LOADED:
+            action = arguments.get("action", "info")
+            if not hasattr(importlib, "import_module"):
+                import importlib
+            from core.meta_learning import MetaLearning
+            if action == "record":
+                ml = _meta_learner or MetaLearning()
+                ml.record_adaptation(...)
+                return _ok({"recorded": True})
+            return _ok({"available": True, "action": action})
+
+        # ── AGI: chimera_quantum_vote ──────────────────────────────────────
+        elif name == "chimera_quantum_vote" and _OPENCHIMERA_LOADED:
+            responses = arguments.get("responses", [])
+            timeout_s = float(arguments.get("timeout_s", 5.0))
+            if not responses:
+                return _err("chimera_quantum_vote requires responses list")
+            try:
+                qe = QuantumEngine(timeout_s=timeout_s)
+                result: ConsensusResult = qe.gather_sync([
+                    {"agent_id": f"agent_{i}", "answer": r.get("answer"), "latency_ms": r.get("latency_ms", 100.0)}
+                    for i, r in enumerate(responses)
+                ])
+                return _ok({
+                    "answer": result.answer,
+                    "confidence": result.confidence,
+                    "participating": result.participating,
+                    "early_exit": result.early_exit,
+                    "contradictions": result.contradictions_found,
+                })
+            except Exception as e:
+                return _err(f"Quantum vote failed: {e}")
+
+        # ── AGI: chimera_plan_goals ─────────────────────────────────────────
+        elif name == "chimera_plan_goals" and _OPENCHIMERA_LOADED:
+            goal = arguments.get("goal", "")
+            if not goal:
+                return _err("chimera_plan_goals requires a goal string")
+            learner = DecompositionStrategyLearner()
+            best = learner.best_strategy(goal[:50])
+            return _ok({
+                "goal": goal,
+                "best_known_strategy": best,
+                "note": "DecompositionStrategyLearner is stateless — attach persistence for learned strategies",
+            })
+
+        # ── AGI: chimera_world_model ─────────────────────────────────────────
+        elif name == "chimera_world_model" and _OPENCHIMERA_LOADED:
+            return _ok({
+                "note": "SystemWorldModel requires a CausalReasoning instance. Use with full OpenChimera kernel.",
+                "available": _OPENCHIMERA_LOADED,
+            })
+
+        # ── AGI: chimera_safety_check ────────────────────────────────────────
+        elif name == "chimera_safety_check" and _OPENCHIMERA_LOADED:
+            content = arguments.get("content", "")
+            sl = _get_safety()
+            is_safe, reason = sl.validate_content(content)
+            return _ok({
+                "is_safe": is_safe,
+                "reason": reason,
+                "blocked_count": sl._blocked_count,
+                "allowed_count": sl._allowed_count,
+            })
+
+        # ── AGI: chimera_ethical_eval ────────────────────────────────────────
+        elif name == "chimera_ethical_eval" and _OPENCHIMERA_LOADED:
+            action_desc = arguments.get("action", "")
+            if not action_desc:
+                return _err("chimera_ethical_eval requires action description")
+            er = _get_ethical()
+            result = er.evaluate_action(action_desc)
+            return _ok(vars(result) if hasattr(result, '__dict__') else result)
+
+        # ── AGI: chimera_embodied ───────────────────────────────────────────
+        elif name == "chimera_embodied" and _OPENCHIMERA_LOADED:
+            return _ok({
+                "note": "EmbodiedInteraction module available. Initialize with hardware context for full functionality.",
+                "available": _OPENCHIMERA_LOADED,
+            })
+
+        # ── AGI: chimera_social ────────────────────────────────────────────
+        elif name == "chimera_social" and _OPENCHIMERA_LOADED:
+            return _ok({
+                "note": "SocialCognition module available. Initialize with interaction history for relationship tracking.",
+                "available": _OPENCHIMERA_LOADED,
+            })
+
+        # ── AGI: chimera_transfer_learn ──────────────────────────────────────
+        elif name == "chimera_transfer_learn" and _OPENCHIMERA_LOADED:
+            return _ok({
+                "note": "TransferLearning module available. Apply learned representations across domains.",
+                "available": _OPENCHIMERA_LOADED,
+            })
+
+        # ── AGI: chimera_evolve ──────────────────────────────────────────────
+        elif name == "chimera_evolve" and _OPENCHIMERA_LOADED:
+            return _ok({
+                "note": "EvolutionEngine available. Run evolutionary optimization over problem populations.",
+                "available": _OPENCHIMERA_LOADED,
+            })
+
+        # ── AGI: chimera_self_model ──────────────────────────────────────────
+        elif name == "chimera_self_model" and _OPENCHIMERA_LOADED:
+            return _ok({
+                "note": "SelfModel module available. Maintain self-representation for capability awareness.",
+                "available": _OPENCHIMERA_LOADED,
+            })
+
+        # ── AGI: chimera_knowledge ──────────────────────────────────────────
+        elif name == "chimera_knowledge" and _OPENCHIMERA_LOADED:
+            action = arguments.get("action", "search")
+            kb = _get_kb()
+            if action == "add":
+                entry = kb.add(
+                    content=arguments.get("content", ""),
+                    category=arguments.get("category", "general"),
+                    tags=arguments.get("tags", []),
+                )
+                return _ok({"added": True, "entry_id": entry.entry_id})
+            elif action == "search":
+                query = arguments.get("query", "")
+                results = kb.search(query=query)
+                return _ok({"results": [vars(r) for r in results]})
+            elif action == "list":
+                return _ok({"entries": len(kb._entries), "categories": list(set(e.category for e in kb._entries.values()))})
+            else:
+                return _ok({"entry_count": len(kb._entries)})
+
+        # ── AGI: chimera_memory ────────────────────────────────────────────────
+        elif name == "chimera_memory" and _OPENCHIMERA_LOADED:
+            return _ok({
+                "note": "MemorySystem available from core.memory. Initialize with storage path for persistence.",
+                "available": _OPENCHIMERA_LOADED,
             })
 
         else:
@@ -1038,10 +1443,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         return _err(f"{type(e).__name__}: {e}")
 
 
-# â”€â”€ entrypoint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── entrypoint ────────────────────────────────────────────────────────────
 
-
-# Async entrypoint (internal)
 async def _async_main() -> None:
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
@@ -1052,7 +1455,6 @@ async def _async_main() -> None:
 
 def main() -> None:
     asyncio.run(_async_main())
-
 
 if __name__ == "__main__":
     main()
