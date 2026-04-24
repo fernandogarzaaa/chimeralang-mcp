@@ -175,6 +175,8 @@ class Lexer:
             "!=": TokenKind.NEQ,
             "<=": TokenKind.LTE,
             ">=": TokenKind.GTE,
+            "&&": TokenKind.AND,   # C-style logical and
+            "||": TokenKind.OR,    # C-style logical or
         }
 
         if two in TWO_CHAR:

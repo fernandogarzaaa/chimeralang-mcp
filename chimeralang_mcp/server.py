@@ -1597,8 +1597,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
         # ── chimera_audit ─────────────────────────────────────────────────
         elif name == "chimera_audit":
-            summary = _middleware.audit_summary()
-            log     = _middleware.call_log()
+            summary  = _middleware.audit_summary()
+            call_log = _middleware.call_log()
             return _ok({
                 **summary,
                 "recent_calls": [
@@ -1609,7 +1609,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                         "violations": len(r.violations),
                         "warnings":   len(r.warnings),
                     }
-                    for r in log[-10:]
+                    for r in call_log[-10:]
                 ],
             })
 

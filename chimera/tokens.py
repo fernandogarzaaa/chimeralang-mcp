@@ -137,6 +137,7 @@ class Token:
 # Keyword lookup table
 KEYWORDS: dict[str, TokenKind] = {
     "val": TokenKind.VAL,
+    "let": TokenKind.VAL,   # alias — both 'let' and 'val' declare variables
     "fn": TokenKind.FN,
     "gate": TokenKind.GATE,
     "goal": TokenKind.GOAL,
