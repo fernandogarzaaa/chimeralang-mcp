@@ -4,8 +4,8 @@ Tools exposed to Claude:
   Core reasoning:    chimera_run, chimera_confident, chimera_explore, chimera_gate,
                     chimera_detect, chimera_constrain, chimera_typecheck, chimera_prove,
                     chimera_audit
-  Token management: chimera_optimize, chimera_compress, chimera_fracture,
-                    chimera_budget, chimera_score
+  Token management: chimera_csm, chimera_budget_lock, chimera_optimize, chimera_compress,
+                    chimera_fracture, chimera_budget, chimera_score
   AGI (OpenChimera): chimera_causal, chimera_deliberate, chimera_metacognize,
                     chimera_meta_learn, chimera_quantum_vote, chimera_plan_goals,
                     chimera_world_model, chimera_safety_check, chimera_ethical_eval,
@@ -416,6 +416,15 @@ _tbm           = get_token_budget_manager()
 _scorer        = MessageImportanceScorer()
 _cost_tracker  = _CostTracker()
 server         = Server("chimeralang-mcp")
+
+# Session-scoped budget lock — set by chimera_budget_lock after user approval
+_session_budget: dict[str, Any] = {
+    "locked": False,
+    "max_output_tokens": None,
+    "label": "",
+    "locked_at": None,
+    "tokens_generated": 0,
+}
 
 # ── AGI component singletons (lazy-initialized) ───────────────────────────
 _causal_reasoning:    _CausalReasoning | None    = None
@@ -995,6 +1004,87 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {},
+            },
+        ),
+        Tool(
+            name="chimera_csm",
+            description=(
+                "MANDATORY Context Session Manager — CALL THIS FIRST on every new user message "
+                "before writing any response or calling any other tool. "
+                "Pipeline: optimize input → compress → count tokens → estimate cost → propose budget. "
+                "WORKFLOW: (1) Call chimera_csm with the user's prompt. "
+                "(2) Show the returned proposal_text to the user verbatim. "
+                "(3) Ask the user: 'Approve this budget? (approve / adjust <N> tokens / skip)'. "
+                "(4) If approved, constrain your entire response to max_output_tokens. "
+                "(5) Use optimized_prompt as the effective input for your reasoning. "
+                "Giving the user visibility and control over token spend before Claude generates output."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "The user's raw input text to optimize and cost-estimate.",
+                    },
+                    "messages": {
+                        "type": "array",
+                        "description": "Optional conversation history [{role, content}] for full context token count.",
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": f"Model for pricing. Default: {_DEFAULT_MODEL}",
+                        "default": _DEFAULT_MODEL,
+                    },
+                    "task_complexity": {
+                        "type": "string",
+                        "enum": ["auto", "simple", "moderate", "complex"],
+                        "description": (
+                            "Controls output token estimate. auto=detect from prompt keywords. "
+                            "simple=brief factual answer, moderate=explanation/how-to, complex=code/build/design. "
+                            "Default: auto"
+                        ),
+                        "default": "auto",
+                    },
+                },
+                "required": ["prompt"],
+            },
+        ),
+        Tool(
+            name="chimera_budget_lock",
+            description=(
+                "Lock the session token budget after the user approves a chimera_csm proposal. "
+                "Call this IMMEDIATELY after the user says 'approve' or 'yes' to the CSM proposal. "
+                "Stores max_output_tokens as the hard constraint for this session. "
+                "Also tracks tokens_generated so Claude can check remaining budget mid-response. "
+                "Returns: {locked, max_output_tokens, remaining_tokens, status, label}. "
+                "After locking: Claude MUST stay within max_output_tokens for its full response. "
+                "If remaining_tokens drops below 20%%, call chimera_compress on your draft before sending."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "max_output_tokens": {
+                        "type": "integer",
+                        "description": "The approved output token budget (from chimera_csm.max_output_tokens).",
+                    },
+                    "tokens_generated": {
+                        "type": "integer",
+                        "description": "Tokens generated so far this turn (update this to check remaining budget). Default 0.",
+                        "default": 0,
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "Optional label for this budget (e.g. task name or user message summary).",
+                        "default": "",
+                    },
+                    "action": {
+                        "type": "string",
+                        "enum": ["lock", "check", "update", "release"],
+                        "description": "lock=set budget, check=query remaining, update=add generated tokens, release=clear budget. Default: lock",
+                        "default": "lock",
+                    },
+                },
+                "required": ["max_output_tokens"],
             },
         ),
         # ── AGI tools ─────────────────────────────────────────────────────
@@ -2170,6 +2260,175 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         # ── chimera_dashboard ─────────────────────────────────────────────────
         elif name == "chimera_dashboard":
             return _ok(_cost_tracker.summary())
+
+        # ── chimera_budget_lock — session budget enforcement ──────────────
+        elif name == "chimera_budget_lock":
+            action         = arguments.get("action", "lock")
+            max_out        = int(arguments.get("max_output_tokens", 0))
+            tokens_gen     = int(arguments.get("tokens_generated", 0))
+            label          = str(arguments.get("label", ""))
+
+            if action == "lock":
+                _session_budget["locked"]           = True
+                _session_budget["max_output_tokens"] = max_out
+                _session_budget["label"]             = label
+                _session_budget["locked_at"]         = time.time()
+                _session_budget["tokens_generated"]  = 0
+                remaining = max_out
+                pct_used  = 0.0
+                status    = "locked"
+
+            elif action == "check":
+                if not _session_budget["locked"]:
+                    return _ok({"locked": False, "message": "No active budget lock. Call chimera_budget_lock with action=lock first."})
+                max_out   = _session_budget["max_output_tokens"]
+                remaining = max(0, max_out - _session_budget["tokens_generated"])
+                pct_used  = round(_session_budget["tokens_generated"] / max(max_out, 1) * 100, 1)
+                status    = "ok" if pct_used < 70 else ("warn" if pct_used < 90 else "critical")
+
+            elif action == "update":
+                _session_budget["tokens_generated"] += tokens_gen
+                max_out   = _session_budget["max_output_tokens"] or 0
+                remaining = max(0, max_out - _session_budget["tokens_generated"])
+                pct_used  = round(_session_budget["tokens_generated"] / max(max_out, 1) * 100, 1)
+                status    = "ok" if pct_used < 70 else ("warn" if pct_used < 90 else "critical")
+
+            elif action == "release":
+                used = _session_budget["tokens_generated"]
+                _session_budget.update({"locked": False, "max_output_tokens": None,
+                                        "label": "", "locked_at": None, "tokens_generated": 0})
+                return _ok({"released": True, "tokens_generated_total": used})
+
+            else:
+                return _err(f"Unknown action: {action}. Use lock|check|update|release.")
+
+            recommendation = (
+                "on_track" if status == "ok"
+                else "consider_compressing_draft" if status == "warn"
+                else "STOP_compress_draft_immediately"
+            )
+            return _ok({
+                "locked":             _session_budget["locked"],
+                "max_output_tokens":  _session_budget["max_output_tokens"],
+                "tokens_generated":   _session_budget["tokens_generated"],
+                "remaining_tokens":   remaining,
+                "pct_used":           pct_used,
+                "status":             status,
+                "recommendation":     recommendation,
+                "label":              _session_budget["label"],
+            })
+
+        # ── chimera_csm — Context Session Manager ─────────────────────────
+        elif name == "chimera_csm":
+            import re as _re
+
+            prompt          = str(arguments["prompt"])
+            messages        = arguments.get("messages", [])
+            model           = arguments.get("model", _DEFAULT_MODEL)
+            task_complexity = arguments.get("task_complexity", "auto")
+
+            # Step 1: optimize the prompt (whitespace + filler strip)
+            _FILLER_PATS = [
+                r"\bplease note that\b", r"\bit is worth noting that\b",
+                r"\bit should be noted that\b", r"\bin order to\b",
+                r"\bbasically\b", r"\bactually\b", r"\bvery\b",
+                r"\bjust\b", r"\bsimply\b", r"\bquite\b",
+                r"\bof course\b", r"\bneedless to say\b",
+            ]
+            opt_prompt = _re.sub(r"[ \t]+", " ", prompt)
+            opt_prompt = _re.sub(r"\n{3,}", "\n\n", opt_prompt).strip()
+            for _pat in _FILLER_PATS:
+                opt_prompt = _re.sub(_pat, "", opt_prompt, flags=_re.IGNORECASE)
+            opt_prompt = _re.sub(r"[ \t]{2,}", " ", opt_prompt).strip()
+
+            # Step 2: light compress (contractions only — preserve meaning)
+            _CONTRACTIONS = {
+                r"\bdo not\b": "don't",   r"\bdoes not\b": "doesn't",
+                r"\bdid not\b": "didn't", r"\bcannot\b": "can't",
+                r"\bwill not\b": "won't",  r"\bwould not\b": "wouldn't",
+                r"\bshould not\b": "shouldn't", r"\bcould not\b": "couldn't",
+                r"\bit is\b": "it's",     r"\bthat is\b": "that's",
+            }
+            for _pat, _repl in _CONTRACTIONS.items():
+                opt_prompt = _re.sub(_pat, _repl, opt_prompt, flags=_re.IGNORECASE)
+
+            # Step 3: count tokens
+            original_tokens   = _tbm.count_tokens(prompt)
+            optimized_tokens  = _tbm.count_tokens(opt_prompt)
+            history_tokens    = _tbm.count_messages(messages) if messages else 0
+            total_input_tokens = optimized_tokens + history_tokens
+
+            tokens_saved = max(0, original_tokens - optimized_tokens)
+            savings_pct  = round(tokens_saved / max(original_tokens, 1) * 100, 1)
+
+            # Step 4: auto-detect task complexity from prompt keywords
+            prompt_lower = prompt.lower()
+            if task_complexity == "auto":
+                _simple_kw  = ["what is", "who is", "when was", "define ", "yes or no", "quick", "brief", "short"]
+                _complex_kw = ["implement", "build a", "write code", "create a", "design", "refactor",
+                               "debug", "full pipeline", "entire", "comprehensive", "step by step",
+                               "architecture", "system", "deep dive"]
+                if any(kw in prompt_lower for kw in _complex_kw):
+                    task_complexity = "complex"
+                elif any(kw in prompt_lower for kw in _simple_kw):
+                    task_complexity = "simple"
+                else:
+                    task_complexity = "moderate"
+
+            # Step 5: estimate output tokens by complexity
+            _mult   = {"simple": 0.8, "moderate": 2.0, "complex": 4.0}
+            _minout = {"simple": 50,  "moderate": 150, "complex": 500}
+            _maxout = {"simple": 600, "moderate": 2000, "complex": 8000}
+            est_output = int(total_input_tokens * _mult.get(task_complexity, 2.0))
+            est_output = max(_minout[task_complexity], min(_maxout[task_complexity], est_output))
+
+            # Step 6: cost estimate
+            in_price, out_price = _MODEL_PRICING.get(model, _MODEL_PRICING[_DEFAULT_MODEL])
+            input_cost      = round(total_input_tokens * in_price  / 1_000_000, 6)
+            output_cost     = round(est_output         * out_price / 1_000_000, 6)
+            total_cost      = round(input_cost + output_cost, 6)
+            unopt_in_cost   = round(original_tokens    * in_price  / 1_000_000, 6)
+            cost_saved      = round(unopt_in_cost - input_cost, 6)
+
+            # Step 7: human-readable proposal
+            proposal_text = (
+                f"┌─ Token Budget Proposal ─────────────────────────────────────┐\n"
+                f"│  Model:           {model:<42}│\n"
+                f"│  Task complexity: {task_complexity:<42}│\n"
+                f"│                                                             │\n"
+                f"│  Original input:  {original_tokens:>6,} tokens                               │\n"
+                f"│  Optimized input: {optimized_tokens:>6,} tokens  (saved {tokens_saved:,}, {savings_pct}%)              │\n"
+                f"│  History context: {history_tokens:>6,} tokens                               │\n"
+                f"│  ─────────────────────────────────────────────────────────  │\n"
+                f"│  Total input:     {total_input_tokens:>6,} tokens                               │\n"
+                f"│  Output budget:   {est_output:>6,} tokens                               │\n"
+                f"│  ─────────────────────────────────────────────────────────  │\n"
+                f"│  Est. total cost: ${total_cost:<8.6f} USD                          │\n"
+                f"│  Optimization saved: ${cost_saved:<6.6f} USD                       │\n"
+                f"└─────────────────────────────────────────────────────────────┘\n"
+                f"\n"
+                f"  Approve this budget?  Reply:  approve  |  adjust <N>  |  skip"
+            )
+
+            return _ok({
+                "optimized_prompt":     opt_prompt,
+                "original_tokens":      original_tokens,
+                "optimized_tokens":     optimized_tokens,
+                "history_tokens":       history_tokens,
+                "total_input_tokens":   total_input_tokens,
+                "tokens_saved":         tokens_saved,
+                "savings_pct":          savings_pct,
+                "task_complexity":      task_complexity,
+                "proposed_output_tokens": est_output,
+                "max_output_tokens":    est_output,
+                "total_tokens":         total_input_tokens + est_output,
+                "estimated_cost_usd":   total_cost,
+                "cost_saved_usd":       cost_saved,
+                "model":                model,
+                "proposal_text":        proposal_text,
+                "action":               "SHOW_PROPOSAL_TO_USER",
+                "token_count_method":   _tbm.get_stats()["token_count_method"],
+            })
 
         else:
             return _err(f"Unknown tool: {name}")
