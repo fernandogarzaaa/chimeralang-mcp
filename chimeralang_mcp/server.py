@@ -4,8 +4,8 @@ Tools exposed to Claude:
   Core reasoning:    chimera_run, chimera_confident, chimera_explore, chimera_gate,
                     chimera_detect, chimera_constrain, chimera_typecheck, chimera_prove,
                     chimera_audit
-  Token management: chimera_csm, chimera_budget_lock, chimera_optimize, chimera_compress,
-                    chimera_fracture, chimera_budget, chimera_score
+  Token management: chimera_csm, chimera_budget_lock, chimera_mode, chimera_optimize,
+                    chimera_compress, chimera_fracture, chimera_budget, chimera_score
   AGI (OpenChimera): chimera_causal, chimera_deliberate, chimera_metacognize,
                     chimera_meta_learn, chimera_quantum_vote, chimera_plan_goals,
                     chimera_world_model, chimera_safety_check, chimera_ethical_eval,
@@ -417,6 +417,9 @@ _scorer        = MessageImportanceScorer()
 _cost_tracker  = _CostTracker()
 server         = Server("chimeralang-mcp")
 
+# Schema overhead token count — computed lazily on first chimera_csm call
+_schema_overhead_cache: int = 0
+
 # Session-scoped budget lock — set by chimera_budget_lock after user approval
 _session_budget: dict[str, Any] = {
     "locked": False,
@@ -436,6 +439,175 @@ _world_model_inst:    _WorldModel | None         = None
 _self_model_inst:     _SelfModel | None          = None
 _memory_store:        _MemoryStore | None        = None
 _meta_learner_inst:   _MetaLearner | None        = None
+
+# ── New stub implementations ──────────────────────────────────────────────
+
+class _EmbodiedState:
+    """Lightweight sensor/action state simulator."""
+    def __init__(self) -> None:
+        self.position    = {"x": 0.0, "y": 0.0, "z": 0.0}
+        self.perception  = {"objects": [], "environment": "unknown"}
+        self.action_log: list[dict[str, Any]]  = []
+        self.energy      = 1.0
+
+    def perceive(self, objects: list[str], environment: str) -> dict[str, Any]:
+        self.perception = {"objects": objects, "environment": environment or "unknown"}
+        return {"perceived": True, "objects": objects, "environment": environment}
+
+    def act(self, action_name: str, params: dict[str, Any]) -> dict[str, Any]:
+        cost = min(0.05 * (1 + len(params)), self.energy)
+        self.energy = max(0.0, self.energy - cost)
+        entry = {"action": action_name, "params": params, "energy_after": round(self.energy, 3)}
+        self.action_log.append(entry)
+        if len(self.action_log) > 20:
+            self.action_log = self.action_log[-20:]
+        return {"executed": True, **entry}
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "position":   self.position,
+            "perception": self.perception,
+            "energy":     round(self.energy, 3),
+            "action_log_size": len(self.action_log),
+            "last_action": self.action_log[-1] if self.action_log else None,
+        }
+
+    def reset(self) -> dict[str, Any]:
+        self.__init__()
+        return {"reset": True, "energy": 1.0}
+
+
+class _SocialCognition:
+    """Interaction history tracker per named agent."""
+    def __init__(self) -> None:
+        self._agents: dict[str, dict[str, Any]] = {}
+
+    def record_interaction(self, agent: str, topic: str, sentiment: float) -> dict[str, Any]:
+        sentiment = max(-1.0, min(1.0, sentiment))
+        if agent not in self._agents:
+            self._agents[agent] = {
+                "interaction_count": 0, "sentiment_sum": 0.0,
+                "last_topic": "", "relationship_strength": 0.5,
+            }
+        rec = self._agents[agent]
+        rec["interaction_count"]  += 1
+        rec["sentiment_sum"]      += sentiment
+        rec["last_topic"]          = topic
+        avg_sentiment              = rec["sentiment_sum"] / rec["interaction_count"]
+        rec["relationship_strength"] = round(min(1.0, 0.5 + avg_sentiment * 0.4 + rec["interaction_count"] * 0.02), 3)
+        return {"agent": agent, "interaction_count": rec["interaction_count"],
+                "sentiment_avg": round(avg_sentiment, 3),
+                "relationship_strength": rec["relationship_strength"]}
+
+    def query(self, agent: str) -> dict[str, Any]:
+        if agent not in self._agents:
+            return {"agent": agent, "found": False}
+        rec = self._agents[agent]
+        return {"agent": agent, "found": True,
+                "interaction_count": rec["interaction_count"],
+                "sentiment_avg": round(rec["sentiment_sum"] / max(rec["interaction_count"], 1), 3),
+                "last_topic": rec["last_topic"],
+                "relationship_strength": rec["relationship_strength"]}
+
+    def list_agents(self) -> dict[str, Any]:
+        return {"agents": list(self._agents.keys()), "count": len(self._agents)}
+
+
+class _TransferLearner:
+    """Domain analogy mapper for cross-domain transfer."""
+    def __init__(self) -> None:
+        self._mappings: list[dict[str, Any]] = []
+
+    def add_mapping(self, source: str, target: str, concept: str,
+                    analogy: str, confidence: float) -> dict[str, Any]:
+        entry = {"source_domain": source, "target_domain": target,
+                 "concept": concept, "analogy": analogy,
+                 "confidence": round(max(0.0, min(1.0, confidence)), 3)}
+        self._mappings.append(entry)
+        return {"added": True, "total_mappings": len(self._mappings), **entry}
+
+    def query(self, source: str, target: str) -> dict[str, Any]:
+        matches = [m for m in self._mappings
+                   if (not source or m["source_domain"] == source)
+                   and (not target or m["target_domain"] == target)]
+        matches.sort(key=lambda m: m["confidence"], reverse=True)
+        return {"matches": matches, "count": len(matches),
+                "source_domain": source, "target_domain": target}
+
+    def list_all(self) -> dict[str, Any]:
+        domains = list({(m["source_domain"], m["target_domain"]) for m in self._mappings})
+        return {"total_mappings": len(self._mappings),
+                "domain_pairs": [{"source": s, "target": t} for s, t in domains]}
+
+
+class _EvolutionEngine:
+    """Fitness-ranked candidate selector via generational selection + mutation."""
+    def __init__(self) -> None:
+        self._last_run: dict[str, Any] = {}
+
+    def run(self, candidates: list[dict[str, Any]], generations: int,
+            mutation_rate: float, survival_ratio: float) -> dict[str, Any]:
+        import random as _random
+        pop = [dict(c) for c in candidates]
+        history: list[dict[str, Any]] = []
+        for gen in range(max(1, generations)):
+            pop.sort(key=lambda c: c["fitness_score"], reverse=True)
+            keep = max(1, int(len(pop) * survival_ratio))
+            survivors = pop[:keep]
+            mutated   = []
+            for c in survivors:
+                m = dict(c)
+                m["fitness_score"] = round(
+                    max(0.0, min(1.0, m["fitness_score"] + _random.uniform(-mutation_rate, mutation_rate))), 4)
+                mutated.append(m)
+            pop = survivors + mutated
+            history.append({"generation": gen + 1, "population": len(pop),
+                             "best_fitness": round(pop[0]["fitness_score"], 4)})
+        pop.sort(key=lambda c: c["fitness_score"], reverse=True)
+        result = {"best": pop[0], "ranked": pop, "generations": history,
+                  "survivors": len(pop), "initial_count": len(candidates)}
+        self._last_run = result
+        return result
+
+    def info(self) -> dict[str, Any]:
+        if not self._last_run:
+            return {"note": "No evolution run yet. Call with action=run and candidates list."}
+        return {"last_run_best": self._last_run.get("best"),
+                "last_run_generations": len(self._last_run.get("generations", []))}
+
+
+_embodied_inst:      _EmbodiedState | None   = None
+_social_inst:        _SocialCognition | None = None
+_transfer_inst:      _TransferLearner | None  = None
+_evolve_inst:        _EvolutionEngine | None  = None
+
+
+def _get_embodied() -> _EmbodiedState:
+    global _embodied_inst
+    if _embodied_inst is None:
+        _embodied_inst = _EmbodiedState()
+    return _embodied_inst
+
+
+def _get_social() -> _SocialCognition:
+    global _social_inst
+    if _social_inst is None:
+        _social_inst = _SocialCognition()
+    return _social_inst
+
+
+def _get_transfer() -> _TransferLearner:
+    global _transfer_inst
+    if _transfer_inst is None:
+        _transfer_inst = _TransferLearner()
+    return _transfer_inst
+
+
+def _get_evolve() -> _EvolutionEngine:
+    global _evolve_inst
+    if _evolve_inst is None:
+        _evolve_inst = _EvolutionEngine()
+    return _evolve_inst
 
 
 def _get_causal() -> _CausalReasoning:
@@ -553,12 +725,7 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="chimera_run",
-            description=(
-                "Execute a ChimeraLang program string and return emitted values with "
-                "confidence scores, gate consensus logs, assertion results, and execution "
-                "trace. Use to run probabilistic reasoning pipelines, validate values "
-                "through consensus gates, or chain hallucination-detection logic."
-            ),
+            description="Execute a ChimeraLang program. Returns emitted values, confidence scores, gate logs, and assertion results.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -569,12 +736,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_confident",
-            description=(
-                "Assert that a value meets ChimeraLang's Confident<> threshold (>= 0.95). "
-                "Returns the wrapped ConfidentValue on success. "
-                "Returns a ConfidenceViolation error with a suggestion if confidence is too low. "
-                "Use before passing a value to a critical downstream tool or decision."
-            ),
+            description="Assert value confidence >= 0.95. Returns ConfidentValue on pass, ConfidenceViolation on fail.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -594,12 +756,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_explore",
-            description=(
-                "Wrap a value as Explore<> — explicitly marking it as exploratory where "
-                "hallucination is permitted and expected. "
-                "Use for hypotheses, creative outputs, brainstorms, and anything that "
-                "must not be treated as verified fact."
-            ),
+            description="Wrap a value as Explore<> — marks it unverified. Use for hypotheses and brainstorms.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -616,13 +773,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_gate",
-            description=(
-                "Collapse multiple candidate values into a single consensus result using "
-                "ChimeraLang's quantum consensus gate. "
-                "Detects and flags trivial consensus (all branches identical — no real agreement). "
-                "Strategies: majority, weighted_vote, highest_confidence. "
-                "Use when reconciling multiple model outputs, tool results, or reasoning branches."
-            ),
+            description="Collapse multiple candidates into one consensus result. Strategies: majority, weighted_vote, highest_confidence. Returns winner and divergence score.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -655,16 +806,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_detect",
-            description=(
-                "Run ChimeraLang hallucination detection on a value. Five strategies:\n"
-                "  range            — numeric value must fall within [min, max]\n"
-                "  dictionary       — value must be in an allowed set\n"
-                "  semantic         — forbidden patterns / absolute-certainty markers\n"
-                "  cross_reference  — value must not deviate from a reference set\n"
-                "  temporal         — value timestamp must not be stale\n"
-                "  confidence_threshold — confidence must be >= threshold\n"
-                "Returns flags with severity scores and evidence."
-            ),
+            description="Hallucination detection. Strategies: range, dictionary, semantic, cross_reference, temporal, confidence_threshold. Returns flags with severity.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -694,13 +836,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_constrain",
-            description=(
-                "Apply ChimeraLang's full constraint middleware to any tool result. "
-                "Pipeline: confidence gate → must-constraint checks → "
-                "forbidden capability logging → hallucination detection → ephemeral scope cleanup. "
-                "Returns pass/fail with violations, warnings, confidence, and audit trace. "
-                "Primary integration point for wrapping Claude's own tool calls."
-            ),
+            description="Apply constraint middleware to a tool output. Checks confidence, forbidden capabilities, hallucinations. Returns pass/fail with audit trace.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -731,12 +867,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_typecheck",
-            description=(
-                "Statically type-check a ChimeraLang program without executing it. "
-                "Validates confidence boundaries, memory scope rules, and illegal "
-                "Explore→Confident promotions outside a gate. "
-                "Returns errors and warnings."
-            ),
+            description="Static type-check a ChimeraLang program without executing it. Validates confidence boundaries and scope rules.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -747,12 +878,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_prove",
-            description=(
-                "Execute a ChimeraLang program and generate a Merkle-chain integrity proof. "
-                "Every reasoning step is SHA-256 hashed and chained — tamper-evident derivation. "
-                "Returns execution results + proof with root hash, chain length, verdict, "
-                "gate certificates, and hallucination scan summary."
-            ),
+            description="Execute ChimeraLang and generate a Merkle-chain integrity proof. Returns results + tamper-evident hash chain with root hash and verdict.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -763,12 +889,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_audit",
-            description=(
-                "Return the constraint audit summary for this session. "
-                "Shows total calls, pass/fail counts, average output confidence, "
-                "flagged warnings, and tools used. "
-                "Use at the end of a multi-tool workflow to assess overall reliability."
-            ),
+            description="Session constraint audit: total calls, pass/fail counts, avg confidence, warnings, tools used.",
             inputSchema={
                 "type": "object",
                 "properties": {},
@@ -776,12 +897,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_fracture",
-            description=(
-                "Full compression pipeline: chimera_optimize each document → chimera_compress messages "
-                "(lossy if opted in) → TokenBudgetManager budget gate → quality flag. "
-                "This is the primary pre-processing step before any complex Claude task. "
-                "Returns quality_passed, combined stats, budget_remaining, and lossy_dropped_count."
-            ),
+            description="Full pipeline: optimize documents → compress messages → budget gate. Returns quality_passed, budget_remaining, lossy_dropped_count.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -813,12 +929,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_optimize",
-            description=(
-                "Reduce token count of a prompt or document by removing redundancy, "
-                "normalising whitespace, collapsing repeated phrases, and stripping "
-                "filler language — while preserving semantic meaning. "
-                "Returns the optimised text and token-savings statistics."
-            ),
+            description="Remove filler, deduplicate sentences, normalize whitespace from text. Returns optimized text and token savings.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -854,12 +965,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_compress",
-            description=(
-                "Compress text using abbreviation and shorthand strategies to minimise "
-                "token usage. Three levels: light (whitespace + punctuation), "
-                "medium (+ common word contractions), aggressive (+ symbol substitutions). "
-                "Returns compressed text, compression ratio, and estimated token savings."
-            ),
+            description="Compress text via contractions/symbols. Levels: light, medium, aggressive. Returns compressed text and compression ratio.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -884,12 +990,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_budget",
-            description=(
-                "Report current token usage against a budget and get a compression recommendation. "
-                "Claude calls this proactively at the start of heavy tasks to know exactly where it stands. "
-                "status: ok (<70% used) | warn (70-85%) | critical (>85%). "
-                "recommendation: ok | call chimera_compress | call chimera_fracture"
-            ),
+            description="Token usage vs context window. Returns status (ok/warn/critical) and recommendation (ok/compress/fracture).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -912,13 +1013,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_score",
-            description=(
-                "Rank messages by importance for lossy compression decisions. "
-                "Each message is scored 0.0-1.0 on recency, content type, information density, "
-                "and replaceability. Lowest scores are dropped first when allow_lossy=True. "
-                "Used by chimera_compress and chimera_fracture internally; also exposed directly "
-                "for transparency audit before lossy compression."
-            ),
+            description="Score messages 0–1 by importance (recency, type, density, replaceability). Lowest scores dropped first in lossy compression.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -932,12 +1027,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_cost_estimate",
-            description=(
-                "Deterministic cost estimate for a text or message list against any supported model. "
-                "Returns token count and estimated dollar cost with NO API call required. "
-                "Supports claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5, gpt-4o, gpt-4o-mini, "
-                "gemini-1.5-pro, and more. Use before sending to the LLM to predict spend."
-            ),
+            description="Estimate token count and USD cost for text or messages. No API call. Supports Claude, GPT, Gemini models.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -964,11 +1054,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_cost_track",
-            description=(
-                "Record a before/after compression event to the session cost tracker. "
-                "Call this after chimera_compress or chimera_fracture to log actual savings. "
-                "Stored in memory (last 100 entries). View with chimera_dashboard."
-            ),
+            description="Log before/after token counts to the session cost tracker. View with chimera_dashboard.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -996,11 +1082,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_dashboard",
-            description=(
-                "Return session-level cost intelligence summary: total tokens saved, "
-                "total dollars saved, average compression %, and the last 10 tracked events. "
-                "Use to report spend reduction to the user or to decide whether more compression is needed."
-            ),
+            description="Session cost summary: tokens saved, dollars saved, avg compression %, last 10 events.",
             inputSchema={
                 "type": "object",
                 "properties": {},
@@ -1009,15 +1091,9 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="chimera_csm",
             description=(
-                "MANDATORY Context Session Manager — CALL THIS FIRST on every new user message "
-                "before writing any response or calling any other tool. "
-                "Pipeline: optimize input → compress → count tokens → estimate cost → propose budget. "
-                "WORKFLOW: (1) Call chimera_csm with the user's prompt. "
-                "(2) Show the returned proposal_text to the user verbatim. "
-                "(3) Ask the user: 'Approve this budget? (approve / adjust <N> tokens / skip)'. "
-                "(4) If approved, constrain your entire response to max_output_tokens. "
-                "(5) Use optimized_prompt as the effective input for your reasoning. "
-                "Giving the user visibility and control over token spend before Claude generates output."
+                "CALL FIRST on every message. Optimizes input, estimates token cost, proposes budget. "
+                "Show proposal_text to user for approval. After approval: constrain response to "
+                "max_output_tokens and use optimized_prompt as effective input."
             ),
             inputSchema={
                 "type": "object",
@@ -1052,13 +1128,9 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="chimera_budget_lock",
             description=(
-                "Lock the session token budget after the user approves a chimera_csm proposal. "
-                "Call this IMMEDIATELY after the user says 'approve' or 'yes' to the CSM proposal. "
-                "Stores max_output_tokens as the hard constraint for this session. "
-                "Also tracks tokens_generated so Claude can check remaining budget mid-response. "
-                "Returns: {locked, max_output_tokens, remaining_tokens, status, label}. "
-                "After locking: Claude MUST stay within max_output_tokens for its full response. "
-                "If remaining_tokens drops below 20%%, call chimera_compress on your draft before sending."
+                "Lock approved token budget after user approves CSM proposal. "
+                "Actions: lock/check/update/release. Returns remaining_tokens and status (ok/warn/critical). "
+                "At critical status, compress draft before sending."
             ),
             inputSchema={
                 "type": "object",
@@ -1090,11 +1162,7 @@ async def list_tools() -> list[Tool]:
         # ── AGI tools ─────────────────────────────────────────────────────
         Tool(
             name="chimera_causal",
-            description=(
-                "Manage a causal graph: add directed cause→effect edges, query edges by "
-                "cause/effect, or find causal pathways between two nodes. "
-                "Actions: add_edge | query | paths | info."
-            ),
+            description="Causal graph. Actions: add_edge, query, paths, info.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1112,11 +1180,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_deliberate",
-            description=(
-                "Run multi-perspective deliberation on a prompt. Supply a list of perspectives "
-                "(each with 'perspective' label and 'content') and receive a consensus analysis "
-                "with Jaccard similarity, divergence score, and the most-consensus perspective."
-            ),
+            description="Multi-perspective deliberation. Returns Jaccard consensus, divergence score, and most-consensus perspective.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1137,11 +1201,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_metacognize",
-            description=(
-                "Reflect on reasoning quality for a list of predictions. Computes Expected "
-                "Calibration Error (ECE), overconfidence rate, and underconfidence rate. "
-                "Supply predictions as [{predicted_confidence, was_correct}]."
-            ),
+            description="Calibration error (ECE) for [{predicted_confidence, was_correct}]. Returns overconfidence/underconfidence rates.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1162,10 +1222,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_meta_learn",
-            description=(
-                "Record an adaptation event (context, action taken, outcome, confidence) "
-                "for meta-learning. Action 'record' stores the event; 'stats' returns totals."
-            ),
+            description="Record adaptation events (context, action, outcome). Actions: record, stats.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1179,11 +1236,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_quantum_vote",
-            description=(
-                "Multi-agent consensus voting. Supply a list of agent responses "
-                "(each with 'answer' and optional 'confidence', 'latency_ms') and receive "
-                "the winning answer, confidence, contradiction count, and early-exit flag."
-            ),
+            description="Confidence-weighted consensus vote across agent responses. Returns winner, confidence, contradiction count.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1207,11 +1260,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_plan_goals",
-            description=(
-                "Decompose a high-level goal into sub-goals using heuristic strategy selection. "
-                "Detects goal type (build/analyze/fix/decide/general) and returns an ordered "
-                "sub-goal list with the chosen strategy name."
-            ),
+            description="Decompose a goal into ordered sub-goals. Detects goal type and returns task list with strategy.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1222,11 +1271,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_world_model",
-            description=(
-                "Persistent in-session world model: store and retrieve facts as key→value pairs "
-                "with confidence scores. Actions: update | query. "
-                "Use to maintain a shared ground truth across reasoning steps."
-            ),
+            description="Confidence-weighted key-value world state. Actions: update, query.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1239,10 +1284,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_safety_check",
-            description=(
-                "Validate content against a safety policy. Scans for forbidden patterns "
-                "(harm, violence, malware, etc.). Returns is_safe, reason, blocked/allowed counts."
-            ),
+            description="Pattern-based content safety check. Returns is_safe, reason, blocked/allowed counts.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1253,11 +1295,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_ethical_eval",
-            description=(
-                "Evaluate an action description against ethical principles. "
-                "Checks for non-maleficence, autonomy, justice violations and "
-                "beneficence, transparency, privacy upholding. Returns score and recommendation."
-            ),
+            description="Rule-based ethical scoring of an action. Checks non-maleficence, autonomy, justice, beneficence. Returns score and recommendation.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1268,30 +1306,75 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_embodied",
-            description="Stub: EmbodiedInteraction module placeholder. Returns capability note.",
-            inputSchema={"type": "object", "properties": {}},
+            description="Sensor/action state simulator. Actions: perceive, act, status, reset. Tracks position, perception, action_log, energy.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action":      {"type": "string", "enum": ["perceive", "act", "status", "reset"], "default": "status"},
+                    "objects":     {"type": "array",  "items": {"type": "string"}, "description": "Perceived objects (perceive action)"},
+                    "environment": {"type": "string", "description": "Environment description (perceive action)", "default": ""},
+                    "action_name": {"type": "string", "description": "Action to perform (act action)", "default": ""},
+                    "params":      {"type": "object", "description": "Action parameters", "default": {}},
+                },
+            },
         ),
         Tool(
             name="chimera_social",
-            description="Stub: SocialCognition module placeholder. Returns capability note.",
-            inputSchema={"type": "object", "properties": {}},
+            description="Interaction history tracker. Actions: record_interaction, query, list_agents. Tracks sentiment and relationship_strength per agent.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action":    {"type": "string", "enum": ["record_interaction", "query", "list_agents"], "default": "list_agents"},
+                    "agent":     {"type": "string", "description": "Agent name for record/query"},
+                    "topic":     {"type": "string", "default": ""},
+                    "sentiment": {"type": "number", "description": "Sentiment -1.0 to 1.0", "default": 0.0},
+                },
+            },
         ),
         Tool(
             name="chimera_transfer_learn",
-            description="Stub: TransferLearning module placeholder. Returns capability note.",
-            inputSchema={"type": "object", "properties": {}},
+            description="Domain analogy mapper. Actions: add_mapping, query, list. Maps concepts from source_domain to target_domain.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action":        {"type": "string", "enum": ["add_mapping", "query", "list"], "default": "list"},
+                    "source_domain": {"type": "string", "default": ""},
+                    "target_domain": {"type": "string", "default": ""},
+                    "concept":       {"type": "string", "default": ""},
+                    "analogy":       {"type": "string", "default": ""},
+                    "confidence":    {"type": "number", "default": 0.7},
+                },
+            },
         ),
         Tool(
             name="chimera_evolve",
-            description="Stub: EvolutionEngine module placeholder. Returns capability note.",
-            inputSchema={"type": "object", "properties": {}},
+            description="Fitness-ranked candidate selector. Runs N generations of selection+mutation. Returns ranked survivors and best candidate.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action":     {"type": "string", "enum": ["run", "info"], "default": "info"},
+                    "candidates": {
+                        "type": "array",
+                        "description": "List of {id, value, fitness_score}",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id":            {"type": "string"},
+                                "value":         {},
+                                "fitness_score": {"type": "number"},
+                            },
+                            "required": ["id", "value", "fitness_score"],
+                        },
+                    },
+                    "generations":    {"type": "integer", "default": 5, "description": "Number of evolution generations"},
+                    "mutation_rate":  {"type": "number",  "default": 0.1, "description": "Fitness noise ±range per generation"},
+                    "survival_ratio": {"type": "number",  "default": 0.5, "description": "Fraction kept each generation"},
+                },
+            },
         ),
         Tool(
             name="chimera_self_model",
-            description=(
-                "Maintain a self-model of agent capabilities. "
-                "Actions: update (record a capability + evidence) | reflect (return all capabilities)."
-            ),
+            description="Capability tracker. Actions: update (record capability+evidence), reflect (return all capabilities).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1304,10 +1387,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_knowledge",
-            description=(
-                "In-session knowledge base. Actions: add (store content with category+tags) | "
-                "search (query by keyword) | list (count entries and categories)."
-            ),
+            description="Keyword-search knowledge base. Actions: add, search, list.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1321,10 +1401,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_memory",
-            description=(
-                "In-session memory store. Actions: store (save content with tags+importance) | "
-                "recall (retrieve by keyword, sorted by importance)."
-            ),
+            description="Session memory store with importance scoring. Actions: store, recall.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1334,6 +1411,26 @@ async def list_tools() -> list[Tool]:
                     "importance": {"type": "number", "default": 0.5},
                     "query":      {"type": "string"},
                     "limit":      {"type": "integer", "default": 10},
+                },
+            },
+        ),
+        Tool(
+            name="chimera_mode",
+            description="Returns the relevant tool subset for a task type. Call to avoid unnecessary tool invocations and reduce token overhead.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["minimal", "token", "agi", "full"],
+                        "description": "minimal=5 core tools, token=+compression, agi=+reasoning, full=all tools",
+                        "default": "minimal",
+                    },
+                    "task_description": {
+                        "type": "string",
+                        "description": "Optional task description for auto mode recommendation.",
+                        "default": "",
+                    },
                 },
             },
         ),
@@ -2155,23 +2252,73 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
         # ── AGI: chimera_embodied ───────────────────────────────────────────
         elif name == "chimera_embodied":
-            return _ok({"note": "EmbodiedInteraction stub — implement sensor/actuator bindings to activate.",
-                        "status": "stub"})
+            action = arguments.get("action", "status")
+            eb = _get_embodied()
+            if action == "perceive":
+                return _ok(eb.perceive(
+                    objects=arguments.get("objects", []),
+                    environment=arguments.get("environment", ""),
+                ))
+            elif action == "act":
+                return _ok(eb.act(
+                    action_name=arguments.get("action_name", "noop"),
+                    params=arguments.get("params", {}),
+                ))
+            elif action == "reset":
+                return _ok(eb.reset())
+            return _ok(eb.status())
 
         # ── AGI: chimera_social ────────────────────────────────────────────
         elif name == "chimera_social":
-            return _ok({"note": "SocialCognition stub — initialize with interaction history for relationship tracking.",
-                        "status": "stub"})
+            action = arguments.get("action", "list_agents")
+            sc = _get_social()
+            if action == "record_interaction":
+                agent = arguments.get("agent", "")
+                if not agent:
+                    return _err("chimera_social record_interaction requires 'agent'")
+                return _ok(sc.record_interaction(
+                    agent=agent,
+                    topic=arguments.get("topic", ""),
+                    sentiment=float(arguments.get("sentiment", 0.0)),
+                ))
+            elif action == "query":
+                return _ok(sc.query(agent=arguments.get("agent", "")))
+            return _ok(sc.list_agents())
 
         # ── AGI: chimera_transfer_learn ──────────────────────────────────────
         elif name == "chimera_transfer_learn":
-            return _ok({"note": "TransferLearning stub — bind domain adapters to activate cross-domain transfer.",
-                        "status": "stub"})
+            action = arguments.get("action", "list")
+            tl = _get_transfer()
+            if action == "add_mapping":
+                return _ok(tl.add_mapping(
+                    source=arguments.get("source_domain", ""),
+                    target=arguments.get("target_domain", ""),
+                    concept=arguments.get("concept", ""),
+                    analogy=arguments.get("analogy", ""),
+                    confidence=float(arguments.get("confidence", 0.7)),
+                ))
+            elif action == "query":
+                return _ok(tl.query(
+                    source=arguments.get("source_domain", ""),
+                    target=arguments.get("target_domain", ""),
+                ))
+            return _ok(tl.list_all())
 
         # ── AGI: chimera_evolve ──────────────────────────────────────────────
         elif name == "chimera_evolve":
-            return _ok({"note": "EvolutionEngine stub — supply a fitness function and population to activate.",
-                        "status": "stub"})
+            action = arguments.get("action", "info")
+            ev = _get_evolve()
+            if action == "run":
+                candidates = arguments.get("candidates")
+                if not candidates:
+                    return _err("chimera_evolve run requires 'candidates' list [{id, value, fitness_score}]")
+                return _ok(ev.run(
+                    candidates=candidates,
+                    generations=int(arguments.get("generations", 5)),
+                    mutation_rate=float(arguments.get("mutation_rate", 0.1)),
+                    survival_ratio=float(arguments.get("survival_ratio", 0.5)),
+                ))
+            return _ok(ev.info())
 
         # ── AGI: chimera_self_model ──────────────────────────────────────────
         elif name == "chimera_self_model":
@@ -2261,6 +2408,65 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         elif name == "chimera_dashboard":
             return _ok(_cost_tracker.summary())
 
+        # ── chimera_mode — task-relevant tool guidance ─────────────────────
+        elif name == "chimera_mode":
+            mode = arguments.get("mode", "minimal")
+            task = arguments.get("task_description", "").lower()
+
+            # Auto-detect mode from task description
+            if task:
+                _agi_kw  = ["reason", "analyze", "causal", "ethical", "plan", "deliberate", "safety", "world"]
+                _tok_kw  = ["compress", "budget", "token", "optimize", "cost", "efficiency"]
+                if any(k in task for k in _agi_kw):
+                    mode = "agi"
+                elif any(k in task for k in _tok_kw):
+                    mode = "token"
+                elif len(task) > 100:
+                    mode = "full"
+
+            _MODES: dict[str, dict[str, Any]] = {
+                "minimal": {
+                    "recommended_tools": ["chimera_csm", "chimera_budget_lock", "chimera_gate", "chimera_confident", "chimera_memory"],
+                    "avoid_tools": ["chimera_causal", "chimera_deliberate", "chimera_metacognize", "chimera_quantum_vote",
+                                    "chimera_embodied", "chimera_social", "chimera_transfer_learn", "chimera_evolve",
+                                    "chimera_prove", "chimera_audit", "chimera_self_model"],
+                    "description": "Core tools only. Best for simple Q&A and short tasks.",
+                },
+                "token": {
+                    "recommended_tools": ["chimera_csm", "chimera_budget_lock", "chimera_optimize", "chimera_compress",
+                                          "chimera_fracture", "chimera_budget", "chimera_score",
+                                          "chimera_cost_estimate", "chimera_cost_track", "chimera_dashboard"],
+                    "avoid_tools": ["chimera_causal", "chimera_deliberate", "chimera_metacognize",
+                                    "chimera_embodied", "chimera_social", "chimera_transfer_learn", "chimera_evolve"],
+                    "description": "Token efficiency focus. Best for long documents or cost-sensitive tasks.",
+                },
+                "agi": {
+                    "recommended_tools": ["chimera_csm", "chimera_causal", "chimera_deliberate", "chimera_metacognize",
+                                          "chimera_quantum_vote", "chimera_plan_goals", "chimera_world_model",
+                                          "chimera_safety_check", "chimera_ethical_eval", "chimera_gate",
+                                          "chimera_confident", "chimera_memory", "chimera_knowledge"],
+                    "avoid_tools": ["chimera_embodied", "chimera_social", "chimera_transfer_learn", "chimera_evolve"],
+                    "description": "AGI reasoning focus. Best for complex analysis, planning, and multi-step reasoning.",
+                },
+                "full": {
+                    "recommended_tools": ["all tools active"],
+                    "avoid_tools": [],
+                    "description": "All 37 tools active. Use only when the task genuinely spans all domains.",
+                },
+            }
+            chosen = _MODES.get(mode, _MODES["minimal"])
+            return _ok({
+                "mode": mode,
+                "description": chosen["description"],
+                "recommended_tools": chosen["recommended_tools"],
+                "avoid_tools": chosen["avoid_tools"],
+                "tool_count_active": len(chosen["recommended_tools"]),
+                "token_savings_note": (
+                    f"Using {len(chosen['recommended_tools'])} tools instead of 37 "
+                    f"skips ~{len(chosen['avoid_tools']) * 60} schema tokens per session."
+                ),
+            })
+
         # ── chimera_budget_lock — session budget enforcement ──────────────
         elif name == "chimera_budget_lock":
             action         = arguments.get("action", "lock")
@@ -2327,41 +2533,74 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             model           = arguments.get("model", _DEFAULT_MODEL)
             task_complexity = arguments.get("task_complexity", "auto")
 
-            # Step 1: optimize the prompt (whitespace + filler strip)
-            _FILLER_PATS = [
+            _CSM_FILLER = [
                 r"\bplease note that\b", r"\bit is worth noting that\b",
                 r"\bit should be noted that\b", r"\bin order to\b",
                 r"\bbasically\b", r"\bactually\b", r"\bvery\b",
                 r"\bjust\b", r"\bsimply\b", r"\bquite\b",
                 r"\bof course\b", r"\bneedless to say\b",
             ]
-            opt_prompt = _re.sub(r"[ \t]+", " ", prompt)
-            opt_prompt = _re.sub(r"\n{3,}", "\n\n", opt_prompt).strip()
-            for _pat in _FILLER_PATS:
-                opt_prompt = _re.sub(_pat, "", opt_prompt, flags=_re.IGNORECASE)
-            opt_prompt = _re.sub(r"[ \t]{2,}", " ", opt_prompt).strip()
-
-            # Step 2: light compress (contractions only — preserve meaning)
-            _CONTRACTIONS = {
+            _CSM_CONTRACTIONS = {
                 r"\bdo not\b": "don't",   r"\bdoes not\b": "doesn't",
                 r"\bdid not\b": "didn't", r"\bcannot\b": "can't",
                 r"\bwill not\b": "won't",  r"\bwould not\b": "wouldn't",
                 r"\bshould not\b": "shouldn't", r"\bcould not\b": "couldn't",
                 r"\bit is\b": "it's",     r"\bthat is\b": "that's",
             }
-            for _pat, _repl in _CONTRACTIONS.items():
-                opt_prompt = _re.sub(_pat, _repl, opt_prompt, flags=_re.IGNORECASE)
+
+            def _csm_compress(text: str) -> str:
+                t = _re.sub(r"[ \t]+", " ", text)
+                t = _re.sub(r"\n{3,}", "\n\n", t).strip()
+                for _p in _CSM_FILLER:
+                    t = _re.sub(_p, "", t, flags=_re.IGNORECASE)
+                t = _re.sub(r"[ \t]{2,}", " ", t).strip()
+                for _p, _r in _CSM_CONTRACTIONS.items():
+                    t = _re.sub(_p, _r, t, flags=_re.IGNORECASE)
+                return t
+
+            # Step 1: optimize prompt
+            opt_prompt = _csm_compress(prompt)
+
+            # Step 2: compress message history (returns optimized_messages)
+            opt_messages: list[dict[str, Any]] = []
+            if messages:
+                for m in messages:
+                    content = str(m.get("content", ""))
+                    opt_messages.append({"role": m.get("role", "user"), "content": _csm_compress(content)})
 
             # Step 3: count tokens
-            original_tokens   = _tbm.count_tokens(prompt)
-            optimized_tokens  = _tbm.count_tokens(opt_prompt)
-            history_tokens    = _tbm.count_messages(messages) if messages else 0
-            total_input_tokens = optimized_tokens + history_tokens
+            original_tokens    = _tbm.count_tokens(prompt)
+            optimized_tokens   = _tbm.count_tokens(opt_prompt)
+            raw_history_tokens = _tbm.count_messages(messages)    if messages     else 0
+            opt_history_tokens = _tbm.count_messages(opt_messages) if opt_messages else 0
+            history_saved      = max(0, raw_history_tokens - opt_history_tokens)
+            total_input_tokens = optimized_tokens + opt_history_tokens
 
-            tokens_saved = max(0, original_tokens - optimized_tokens)
-            savings_pct  = round(tokens_saved / max(original_tokens, 1) * 100, 1)
+            tokens_saved = max(0, original_tokens - optimized_tokens) + history_saved
+            savings_pct  = round(tokens_saved / max(original_tokens + raw_history_tokens, 1) * 100, 1)
 
-            # Step 4: auto-detect task complexity from prompt keywords
+            # Step 4: schema overhead (lazy, cached)
+            global _schema_overhead_cache
+            if _schema_overhead_cache == 0:
+                # Approximate: count tokens in all tool descriptions at runtime
+                # We use a fixed estimate based on current description length
+                _schema_overhead_cache = _tbm.count_tokens(
+                    " ".join([
+                        "chimera_run chimera_confident chimera_explore chimera_gate chimera_detect "
+                        "chimera_constrain chimera_typecheck chimera_prove chimera_audit "
+                        "chimera_fracture chimera_optimize chimera_compress chimera_budget chimera_score "
+                        "chimera_cost_estimate chimera_cost_track chimera_dashboard chimera_csm "
+                        "chimera_budget_lock chimera_causal chimera_deliberate chimera_metacognize "
+                        "chimera_meta_learn chimera_quantum_vote chimera_plan_goals chimera_world_model "
+                        "chimera_safety_check chimera_ethical_eval chimera_embodied chimera_social "
+                        "chimera_transfer_learn chimera_evolve chimera_self_model chimera_knowledge "
+                        "chimera_memory chimera_mode"
+                    ])
+                ) * 15  # ~15x multiplier: description + schema per tool
+
+            schema_overhead = _schema_overhead_cache
+
+            # Step 5: auto-detect task complexity
             prompt_lower = prompt.lower()
             if task_complexity == "auto":
                 _simple_kw  = ["what is", "who is", "when was", "define ", "yes or no", "quick", "brief", "short"]
@@ -2375,59 +2614,66 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 else:
                     task_complexity = "moderate"
 
-            # Step 5: estimate output tokens by complexity
+            # Step 6: estimate output tokens
             _mult   = {"simple": 0.8, "moderate": 2.0, "complex": 4.0}
             _minout = {"simple": 50,  "moderate": 150, "complex": 500}
             _maxout = {"simple": 600, "moderate": 2000, "complex": 8000}
             est_output = int(total_input_tokens * _mult.get(task_complexity, 2.0))
             est_output = max(_minout[task_complexity], min(_maxout[task_complexity], est_output))
 
-            # Step 6: cost estimate
+            # Step 7: cost estimate (includes schema overhead in total session view)
             in_price, out_price = _MODEL_PRICING.get(model, _MODEL_PRICING[_DEFAULT_MODEL])
-            input_cost      = round(total_input_tokens * in_price  / 1_000_000, 6)
-            output_cost     = round(est_output         * out_price / 1_000_000, 6)
-            total_cost      = round(input_cost + output_cost, 6)
-            unopt_in_cost   = round(original_tokens    * in_price  / 1_000_000, 6)
-            cost_saved      = round(unopt_in_cost - input_cost, 6)
+            input_cost          = round(total_input_tokens * in_price  / 1_000_000, 6)
+            output_cost         = round(est_output         * out_price / 1_000_000, 6)
+            schema_cost         = round(schema_overhead    * in_price  / 1_000_000, 6)
+            total_cost          = round(input_cost + output_cost, 6)
+            session_total_cost  = round(total_cost + schema_cost, 6)
+            unopt_in_cost       = round((original_tokens + raw_history_tokens) * in_price / 1_000_000, 6)
+            cost_saved          = round(unopt_in_cost - input_cost, 6)
 
-            # Step 7: human-readable proposal
+            # Step 8: proposal text
             proposal_text = (
-                f"┌─ Token Budget Proposal ─────────────────────────────────────┐\n"
-                f"│  Model:           {model:<42}│\n"
-                f"│  Task complexity: {task_complexity:<42}│\n"
-                f"│                                                             │\n"
-                f"│  Original input:  {original_tokens:>6,} tokens                               │\n"
-                f"│  Optimized input: {optimized_tokens:>6,} tokens  (saved {tokens_saved:,}, {savings_pct}%)              │\n"
-                f"│  History context: {history_tokens:>6,} tokens                               │\n"
-                f"│  ─────────────────────────────────────────────────────────  │\n"
-                f"│  Total input:     {total_input_tokens:>6,} tokens                               │\n"
-                f"│  Output budget:   {est_output:>6,} tokens                               │\n"
-                f"│  ─────────────────────────────────────────────────────────  │\n"
-                f"│  Est. total cost: ${total_cost:<8.6f} USD                          │\n"
-                f"│  Optimization saved: ${cost_saved:<6.6f} USD                       │\n"
-                f"└─────────────────────────────────────────────────────────────┘\n"
+                f"Token Budget Proposal\n"
+                f"  Model:            {model}\n"
+                f"  Task complexity:  {task_complexity}\n"
+                f"\n"
+                f"  Input (prompt):   {original_tokens:,} → {optimized_tokens:,} tokens (saved {original_tokens - optimized_tokens:,})\n"
+                f"  History context:  {raw_history_tokens:,} → {opt_history_tokens:,} tokens (saved {history_saved:,})\n"
+                f"  Total input:      {total_input_tokens:,} tokens\n"
+                f"  Output budget:    {est_output:,} tokens\n"
+                f"\n"
+                f"  Est. turn cost:   ${total_cost:.6f} USD\n"
+                f"  Schema overhead:  ~{schema_overhead:,} tokens (${schema_cost:.6f} USD, fixed per session)\n"
+                f"  Total session:    ~${session_total_cost:.6f} USD\n"
+                f"  Compression saved: ${cost_saved:.6f} USD\n"
                 f"\n"
                 f"  Approve this budget?  Reply:  approve  |  adjust <N>  |  skip"
             )
 
             return _ok({
-                "optimized_prompt":     opt_prompt,
-                "original_tokens":      original_tokens,
-                "optimized_tokens":     optimized_tokens,
-                "history_tokens":       history_tokens,
-                "total_input_tokens":   total_input_tokens,
-                "tokens_saved":         tokens_saved,
-                "savings_pct":          savings_pct,
-                "task_complexity":      task_complexity,
+                "optimized_prompt":      opt_prompt,
+                "optimized_messages":    opt_messages,
+                "original_tokens":       original_tokens,
+                "optimized_tokens":      optimized_tokens,
+                "raw_history_tokens":    raw_history_tokens,
+                "opt_history_tokens":    opt_history_tokens,
+                "history_saved":         history_saved,
+                "total_input_tokens":    total_input_tokens,
+                "tokens_saved":          tokens_saved,
+                "savings_pct":           savings_pct,
+                "schema_overhead_tokens": schema_overhead,
+                "task_complexity":       task_complexity,
                 "proposed_output_tokens": est_output,
-                "max_output_tokens":    est_output,
-                "total_tokens":         total_input_tokens + est_output,
-                "estimated_cost_usd":   total_cost,
-                "cost_saved_usd":       cost_saved,
-                "model":                model,
-                "proposal_text":        proposal_text,
-                "action":               "SHOW_PROPOSAL_TO_USER",
-                "token_count_method":   _tbm.get_stats()["token_count_method"],
+                "max_output_tokens":     est_output,
+                "total_tokens":          total_input_tokens + est_output,
+                "estimated_cost_usd":    total_cost,
+                "schema_overhead_cost_usd": schema_cost,
+                "session_total_cost_usd": session_total_cost,
+                "cost_saved_usd":        cost_saved,
+                "model":                 model,
+                "proposal_text":         proposal_text,
+                "action":                "SHOW_PROPOSAL_TO_USER",
+                "token_count_method":    _tbm.get_stats()["token_count_method"],
             })
 
         else:
