@@ -5,7 +5,8 @@ Tools exposed to Claude:
                     chimera_detect, chimera_constrain, chimera_typecheck, chimera_prove,
                     chimera_audit
   Token management: chimera_csm, chimera_budget_lock, chimera_mode, chimera_optimize,
-                    chimera_compress, chimera_fracture, chimera_budget, chimera_score
+                    chimera_compress, chimera_fracture, chimera_budget, chimera_score,
+                    chimera_batch, chimera_summarize
   AGI (OpenChimera): chimera_causal, chimera_deliberate, chimera_metacognize,
                     chimera_meta_learn, chimera_quantum_vote, chimera_plan_goals,
                     chimera_world_model, chimera_safety_check, chimera_ethical_eval,
@@ -1434,6 +1435,55 @@ async def list_tools() -> list[Tool]:
                 },
             },
         ),
+        Tool(
+            name="chimera_batch",
+            description="Execute multiple chimera tools in one call. Saves tokens vs separate round-trips. Returns array of results in call order.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "calls": {
+                        "type": "array",
+                        "description": "Ordered list of tool calls to execute",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "tool": {"type": "string", "description": "Chimera tool name"},
+                                "args": {"type": "object", "description": "Tool arguments"},
+                            },
+                            "required": ["tool"],
+                        },
+                        "minItems": 1,
+                    },
+                    "stop_on_error": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Stop on first error. Default false (collect all results).",
+                    },
+                },
+                "required": ["calls"],
+            },
+        ),
+        Tool(
+            name="chimera_summarize",
+            description="LLM-free extractive summarizer. Ranks sentences by TF-IDF and returns top N. Use before passing long docs to other tools.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text":  {"type": "string", "description": "Text to summarize"},
+                    "ratio": {
+                        "type": "number",
+                        "description": "Target output/input ratio (0.05–0.9). Default 0.25",
+                        "default": 0.25, "minimum": 0.05, "maximum": 0.9,
+                    },
+                    "min_sentences": {
+                        "type": "integer",
+                        "description": "Minimum sentences to keep. Default 3.",
+                        "default": 3,
+                    },
+                },
+                "required": ["text"],
+            },
+        ),
     ]
 
 
@@ -2594,7 +2644,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                         "chimera_meta_learn chimera_quantum_vote chimera_plan_goals chimera_world_model "
                         "chimera_safety_check chimera_ethical_eval chimera_embodied chimera_social "
                         "chimera_transfer_learn chimera_evolve chimera_self_model chimera_knowledge "
-                        "chimera_memory chimera_mode"
+                        "chimera_memory chimera_mode chimera_batch chimera_summarize"
                     ])
                 ) * 15  # ~15x multiplier: description + schema per tool
 
@@ -2674,6 +2724,113 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "proposal_text":         proposal_text,
                 "action":                "SHOW_PROPOSAL_TO_USER",
                 "token_count_method":    _tbm.get_stats()["token_count_method"],
+            })
+
+        # ── chimera_batch — multi-tool single call ────────────────────────
+        elif name == "chimera_batch":
+            calls         = arguments.get("calls", [])
+            stop_on_error = bool(arguments.get("stop_on_error", False))
+
+            results: list[dict[str, Any]] = []
+            for i, call in enumerate(calls):
+                tool_name = call.get("tool", "")
+                tool_args = call.get("args") or {}
+                try:
+                    r = await call_tool(tool_name, tool_args)
+                    raw = r.content[0].text if r.content else "{}"
+                    results.append({
+                        "index":   i,
+                        "tool":    tool_name,
+                        "success": not r.isError,
+                        "result":  json.loads(raw),
+                    })
+                    if stop_on_error and r.isError:
+                        break
+                except Exception as exc:
+                    results.append({
+                        "index":   i,
+                        "tool":    tool_name,
+                        "success": False,
+                        "result":  {"error": str(exc)},
+                    })
+                    if stop_on_error:
+                        break
+
+            return _ok({
+                "results":   results,
+                "total":     len(calls),
+                "executed":  len(results),
+                "succeeded": sum(1 for r in results if r["success"]),
+                "failed":    sum(1 for r in results if not r["success"]),
+            })
+
+        # ── chimera_summarize — LLM-free extractive summarizer ────────────
+        elif name == "chimera_summarize":
+            import re as _re
+            import math as _math
+            from collections import Counter as _Counter
+
+            text          = arguments["text"]
+            ratio         = float(arguments.get("ratio", 0.25))
+            min_sentences = int(arguments.get("min_sentences", 3))
+
+            sentences = [s.strip() for s in _re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+            if not sentences:
+                return _ok({"summary": text, "sentences_in": 0, "sentences_out": 0,
+                            "ratio_achieved": 1.0, "tokens_before": 0, "tokens_after": 0,
+                            "savings_pct": 0.0})
+
+            n_keep = min(max(min_sentences, int(len(sentences) * ratio)), len(sentences))
+            if n_keep >= len(sentences):
+                tb = _tbm.count_tokens(text)
+                return _ok({"summary": text, "sentences_in": len(sentences),
+                            "sentences_out": len(sentences), "ratio_achieved": 1.0,
+                            "tokens_before": tb, "tokens_after": tb, "savings_pct": 0.0})
+
+            _STOP = {
+                "the","and","for","are","but","not","you","all","can","was","has","have",
+                "this","that","with","they","been","from","its","your","into","than","then",
+                "when","will","more","also","some","would","could","should","there","their",
+                "these","those","which","about","after","before","being","doing","other",
+            }
+
+            def _tok(s: str) -> list[str]:
+                return [w for w in _re.findall(r"\b[a-z]{3,}\b", s.lower()) if w not in _STOP]
+
+            n     = len(sentences)
+            tf    = _Counter(w for s in sentences for w in _tok(s))
+            total = max(sum(tf.values()), 1)
+            df: dict[str, int] = _Counter()
+            for s in sentences:
+                for w in set(_tok(s)):
+                    df[w] += 1
+
+            def _score(s: str, pos: int) -> float:
+                words = _tok(s)
+                if not words:
+                    return 0.0
+                tfidf = sum(
+                    (tf[w] / total) * _math.log(n / max(df[w], 1) + 1) for w in words
+                ) / len(words)
+                pos_bonus = 0.10 if pos == 0 else (0.05 if pos == n - 1 else 0.0)
+                len_bonus = min(len(words) / 20.0, 0.10)
+                return tfidf + pos_bonus + len_bonus
+
+            scored      = sorted(enumerate(sentences), key=lambda x: _score(x[1], x[0]), reverse=True)
+            kept_idx    = sorted(idx for idx, _ in scored[:n_keep])
+            summary     = " ".join(sentences[i] for i in kept_idx)
+            tb          = _tbm.count_tokens(text)
+            ta          = _tbm.count_tokens(summary)
+            savings_pct = round((1 - ta / max(tb, 1)) * 100, 1)
+
+            return _ok({
+                "summary":          summary,
+                "sentences_in":     len(sentences),
+                "sentences_out":    n_keep,
+                "ratio_achieved":   round(n_keep / len(sentences), 3),
+                "tokens_before":    tb,
+                "tokens_after":     ta,
+                "savings_pct":      savings_pct,
             })
 
         else:
