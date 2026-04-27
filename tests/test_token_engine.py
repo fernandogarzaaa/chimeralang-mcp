@@ -68,6 +68,39 @@ class TestTokenBudgetManager(unittest.TestCase):
             self.assertIn("token_count_method", stats)
             self.assertIn("cache_size", stats)
             self.assertEqual(stats["cache_size"], 1)
+            self.assertIn("cache_max_entries", stats)
+            self.assertIn("fallback_count", stats)
+
+    def test_cache_has_bounded_size(self):
+        """Cache evicts oldest values when max size is reached."""
+        with patch.dict("os.environ", {"CHIMERA_TOKEN_CACHE_MAX_ENTRIES": "2"}, clear=True):
+            from chimeralang_mcp.token_engine import TokenBudgetManager
+            TokenBudgetManager._instance = None
+            tbm = TokenBudgetManager()
+            tbm._initialized = False
+            tbm.__init__()
+            tbm.count_tokens("one")
+            tbm.count_tokens("two")
+            tbm.count_tokens("three")
+            self.assertEqual(len(tbm._cache), 2)
+
+    def test_api_error_increments_fallback_count(self):
+        """API errors should increment fallback counters and preserve estimates."""
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "fake"}, clear=True):
+            from chimeralang_mcp.token_engine import TokenBudgetManager
+            TokenBudgetManager._instance = None
+            tbm = TokenBudgetManager()
+            tbm._initialized = False
+            tbm.__init__()
+            tbm._client = MagicMock()
+            tbm._token_count_method = "api"
+            tbm._client.beta.messages.count_tokens.side_effect = RuntimeError("boom")
+
+            result = tbm.count_tokens("abcdef")
+
+            self.assertEqual(result, 1)  # len("abcdef") // 4
+            self.assertEqual(tbm._fallback_count, 1)
+            self.assertEqual(tbm._last_fallback_reason, "count_tokens_api_error")
 
 
 class TestMessageImportanceScorer(unittest.TestCase):

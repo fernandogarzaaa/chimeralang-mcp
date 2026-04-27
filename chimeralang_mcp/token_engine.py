@@ -8,6 +8,7 @@ import hashlib
 import logging
 import os
 import time
+from collections import OrderedDict
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -27,9 +28,11 @@ class TokenBudgetManager:
 
     def __new__(cls) -> TokenBudgetManager:
         # Singleton
-        obj = object.__new__(cls)
-        obj._initialized = False
-        return obj
+        if cls._instance is None:
+            obj = object.__new__(cls)
+            obj._initialized = False
+            cls._instance = obj
+        return cls._instance
 
     def __init__(self) -> None:
         if self._initialized:
@@ -37,9 +40,15 @@ class TokenBudgetManager:
         self._initialized = True
         self._api_key = os.environ.get("ANTHROPIC_API_KEY")
         self._client: Any = None
-        self._cache: dict[str, int] = {}
+        self._cache_max_entries = self._read_cache_size()
+        self._cache: OrderedDict[str, int] = OrderedDict()
         self._cache_hits = 0
         self._cache_misses = 0
+        self._fallback_count = 0
+        self._last_fallback_reason = ""
+        self._last_fallback_at = 0.0
+        self._last_fallback_log_at = 0.0
+        self._fallback_log_interval_s = self._read_fallback_log_interval()
         self._token_count_method = "estimate"
         if self._api_key:
             try:
@@ -61,9 +70,10 @@ class TokenBudgetManager:
         if not text:
             return 0
         h = self._hash(text)
-        if h in self._cache:
+        cached = self._cache_get(h)
+        if cached is not None:
             self._cache_hits += 1
-            return self._cache[h]
+            return cached
         self._cache_misses += 1
         if self._client and self._token_count_method == "api":
             try:
@@ -72,13 +82,12 @@ class TokenBudgetManager:
                     messages=[{"role": "user", "content": text}],
                 )
                 count = result.usage.input_tokens
-            except Exception:
+            except Exception as e:
                 count = len(text) // 4
-                self._token_count_method = "estimate"
-                log.warning("count_tokens API failed, falling back to len//4")
+                self._record_fallback("count_tokens_api_error", e)
         else:
             count = len(text) // 4
-        self._cache[h] = count
+        self._cache_put(h, count)
         return count
 
     def count_messages(self, messages: list[dict[str, Any]]) -> int:
@@ -87,9 +96,10 @@ class TokenBudgetManager:
             return 0
         # Build cache key from all content
         content_hash = self._hash(str(messages))
-        if content_hash in self._cache:
+        cached = self._cache_get(content_hash)
+        if cached is not None:
             self._cache_hits += 1
-            return self._cache[content_hash]
+            return cached
         self._cache_misses += 1
         if self._client and self._token_count_method == "api":
             try:
@@ -108,12 +118,12 @@ class TokenBudgetManager:
                     messages=anthropic_msgs,
                 )
                 count = result.usage.input_tokens
-            except Exception:
-                count = sum(len(m.get("content", "") or "") // 4 for m in messages)
-                self._token_count_method = "estimate"
+            except Exception as e:
+                count = sum(self._estimate_message_tokens(m) for m in messages)
+                self._record_fallback("count_messages_api_error", e)
         else:
-            count = sum(len(m.get("content", "") or "") // 4 for m in messages)
-        self._cache[content_hash] = count
+            count = sum(self._estimate_message_tokens(m) for m in messages)
+        self._cache_put(content_hash, count)
         return count
 
     def count_texts(self, texts: list[str]) -> int:
@@ -127,6 +137,10 @@ class TokenBudgetManager:
             "cache_size": len(self._cache),
             "cache_hits": self._cache_hits,
             "cache_misses": self._cache_misses,
+            "cache_max_entries": self._cache_max_entries,
+            "fallback_count": self._fallback_count,
+            "last_fallback_reason": self._last_fallback_reason,
+            "last_fallback_at": self._last_fallback_at,
         }
 
     # ------------------------------------------------------------------
@@ -136,6 +150,65 @@ class TokenBudgetManager:
     @staticmethod
     def _hash(text: str) -> str:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def _cache_get(self, key: str) -> int | None:
+        value = self._cache.get(key)
+        if value is None:
+            return None
+        self._cache.move_to_end(key)
+        return value
+
+    def _cache_put(self, key: str, value: int) -> None:
+        self._cache[key] = value
+        self._cache.move_to_end(key)
+        while len(self._cache) > self._cache_max_entries:
+            self._cache.popitem(last=False)
+
+    def _record_fallback(self, reason: str, exc: Exception | None = None) -> None:
+        self._token_count_method = "estimate"
+        self._fallback_count += 1
+        self._last_fallback_reason = reason
+        self._last_fallback_at = time.time()
+        now = self._last_fallback_at
+        should_log = (now - self._last_fallback_log_at) >= self._fallback_log_interval_s
+        if self._fallback_count == 1 or should_log:
+            self._last_fallback_log_at = now
+            if exc:
+                log.warning("TokenBudgetManager fallback to len//4 (%s): %s", reason, exc)
+            else:
+                log.warning("TokenBudgetManager fallback to len//4 (%s)", reason)
+
+    @staticmethod
+    def _estimate_message_tokens(message: dict[str, Any]) -> int:
+        content = message.get("content", "")
+        if isinstance(content, list):
+            text_parts = [str(p.get("text", "")) for p in content if isinstance(p, dict) and p.get("type") == "text"]
+            return len(" ".join(text_parts)) // 4
+        return len(str(content or "")) // 4
+
+    @staticmethod
+    def _read_cache_size() -> int:
+        raw = os.environ.get("CHIMERA_TOKEN_CACHE_MAX_ENTRIES", "").strip()
+        if not raw:
+            return 2048
+        try:
+            parsed = int(raw)
+            return max(parsed, 1)
+        except ValueError:
+            log.warning("Invalid CHIMERA_TOKEN_CACHE_MAX_ENTRIES=%r; using default 2048", raw)
+            return 2048
+
+    @staticmethod
+    def _read_fallback_log_interval() -> float:
+        raw = os.environ.get("CHIMERA_TOKEN_FALLBACK_LOG_INTERVAL_S", "").strip()
+        if not raw:
+            return 60.0
+        try:
+            parsed = float(raw)
+            return max(parsed, 0.0)
+        except ValueError:
+            log.warning("Invalid CHIMERA_TOKEN_FALLBACK_LOG_INTERVAL_S=%r; using default 60.0", raw)
+            return 60.0
 
 
 # ---------------------------------------------------------------------------
