@@ -1511,13 +1511,13 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                         "Use chimera_explore for uncertain values, or route through "
                         "chimera_gate to build consensus before asserting confidence."
                     ),
-                    "value":      str(value),
+                    "value":      value,
                     "confidence": confidence,
                 })
             return _ok({
                 "passed":     True,
                 "type":       "ConfidentValue",
-                "value":      str(value),
+                "value":      value,
                 "confidence": confidence,
                 "label":      label,
                 "trace":      [f"confident({label})", f"score={confidence:.4f}"],
@@ -1530,7 +1530,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             label      = arguments.get("label", str(value)[:40])
             return _ok({
                 "type":              "ExploreValue",
-                "value":             str(value),
+                "value":             value,
                 "confidence":        confidence,
                 "label":             label,
                 "exploration_budget": 1.0,
@@ -1759,7 +1759,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             return _ok({
                 "tool_name":  r.tool_name,
                 "passed":     r.passed,
-                "value":      str(r.value),
+                "value":      r.value,
                 "confidence": round(r.confidence, 4),
                 "violations": r.violations,
                 "warnings":   r.warnings,
@@ -1859,6 +1859,28 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             token_budget = int(arguments.get("token_budget", 1500))
             allow_lossy  = bool(arguments.get("allow_lossy", False))
 
+            def _compress_message_history(msgs: list[dict[str, Any]]) -> str:
+                if not msgs:
+                    return ""
+                msg_text = "\n".join(
+                    f"[{m.get('role', 'user')}]: {m.get('content', '')}"
+                    for m in msgs
+                )
+                compressed = _re.sub(r"[ \t]+", " ", msg_text)
+                compressed = _re.sub(r"\n{3,}", "\n\n", compressed).strip()
+                for pat, repl in {
+                    r"\bdo not\b": "don't", r"\bdoes not\b": "doesn't",
+                    r"\bdid not\b": "didn't", r"\bcannot\b": "can't",
+                    r"\bwill not\b": "won't", r"\bwould not\b": "wouldn't",
+                    r"\bshould not\b": "shouldn't", r"\bcould not\b": "couldn't",
+                    r"\bare not\b": "aren't", r"\bwas not\b": "wasn't",
+                    r"\bwere not\b": "weren't", r"\bhave not\b": "haven't",
+                    r"\bhas not\b": "hasn't", r"\bhad not\b": "hadn't",
+                    r"\bit is\b": "it's", r"\bthat is\b": "that's",
+                }.items():
+                    compressed = _re.sub(pat, repl, compressed, flags=_re.IGNORECASE)
+                return compressed
+
             total_start = time.time()
             stats: dict[str, Any] = {
                 "documents_input": sum(len(d) for d in documents),
@@ -1886,27 +1908,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             stats["documents_optimised"] = sum(len(d) for d in optimised_docs)
 
             # Step 2: compress messages (lossless first)
-            if messages:
-                msg_text = "\n".join(
-                    f"[{m.get('role', 'user')}]: {m.get('content', '')}"
-                    for m in messages
-                )
-                compressed = _re.sub(r"[ \t]+", " ", msg_text)
-                compressed = _re.sub(r"\n{3,}", "\n\n", compressed).strip()
-                for pat, repl in {
-                    r"\bdo not\b": "don't", r"\bdoes not\b": "doesn't",
-                    r"\bdid not\b": "didn't", r"\bcannot\b": "can't",
-                    r"\bwill not\b": "won't", r"\bwould not\b": "wouldn't",
-                    r"\bshould not\b": "shouldn't", r"\bcould not\b": "couldn't",
-                    r"\bare not\b": "aren't", r"\bwas not\b": "wasn't",
-                    r"\bwere not\b": "weren't", r"\bhave not\b": "haven't",
-                    r"\bhas not\b": "hasn't", r"\bhad not\b": "hadn't",
-                    r"\bit is\b": "it's", r"\bthat is\b": "that's",
-                }.items():
-                    compressed = _re.sub(pat, repl, compressed, flags=_re.IGNORECASE)
-                messages_compressed = compressed
-            else:
-                messages_compressed = ""
+            messages_compressed = _compress_message_history(messages)
 
             tokens_after = _tbm.count_tokens(messages_compressed) + _tbm.count_texts(optimised_docs)
             stats["tokens_after_pipeline"] = tokens_after
@@ -1916,38 +1918,36 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
             # Step 3: lossy if needed and opted in
             if not quality_passed and allow_lossy:
-                ranked = _scorer.rank(messages)
+                original_messages = list(messages)
+                ranked = _scorer.rank(original_messages)
                 min_keep = 2
-                to_drop: list[dict[str, Any]] = []
+                dropped_indexes: set[int] = set()
+                dropped_scores: list[float] = []
+                kept = original_messages
                 for entry in ranked:
-                    if len(messages) - len(to_drop) <= min_keep:
+                    if quality_passed or len(original_messages) - len(dropped_indexes) <= min_keep:
                         break
-                    to_drop.append(entry)
-                dropped_scores = [e["score"] for e in to_drop]
-                kept = [m for i, m in enumerate(messages)
-                        if i not in {e["index"] for e in to_drop}]
-                if to_drop:
+                    dropped_indexes.add(entry["index"])
+                    dropped_scores.append(entry["score"])
+                    kept = [m for i, m in enumerate(original_messages)
+                            if i not in dropped_indexes]
+                    if not kept:
+                        break
                     tombstone = {
                         "role": "system",
                         "content": (
-                            f"[{len(to_drop)} messages omitted — "
+                            f"[{len(dropped_indexes)} messages omitted - "
                             f"low importance scores: {', '.join(str(s) for s in dropped_scores)}]"
                         ),
                     }
-                    kept.append(tombstone)
-                    messages = kept
-                    lossy_dropped_count = len(to_drop)
-                    # Re-compress kept messages
-                    msg_text = "\n".join(
-                        f"[{m.get('role', 'user')}]: {m.get('content', '')}"
-                        for m in messages
-                    )
-                    compressed = _re.sub(r"[ \t]+", " ", msg_text)
-                    compressed = _re.sub(r"\n{3,}", "\n\n", compressed).strip()
-                    messages_compressed = compressed
+                    messages = kept + [tombstone]
+                    lossy_dropped_count = len(dropped_indexes)
+                    messages_compressed = _compress_message_history(messages)
                     tokens_after = _tbm.count_tokens(messages_compressed) + _tbm.count_texts(optimised_docs)
                     budget_remaining = max(0, token_budget - tokens_after)
                     quality_passed = tokens_after <= token_budget
+                    if quality_passed:
+                        break
 
             stats["tokens_after_pipeline"] = tokens_after
             stats["budget_remaining"] = budget_remaining
@@ -2462,6 +2462,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         elif name == "chimera_mode":
             mode = arguments.get("mode", "minimal")
             task = arguments.get("task_description", "").lower()
+            all_tool_names = [tool.name for tool in await list_tools()]
+            total_tool_count = len(all_tool_names)
 
             # Auto-detect mode from task description
             if task:
@@ -2499,9 +2501,9 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     "description": "AGI reasoning focus. Best for complex analysis, planning, and multi-step reasoning.",
                 },
                 "full": {
-                    "recommended_tools": ["all tools active"],
+                    "recommended_tools": all_tool_names,
                     "avoid_tools": [],
-                    "description": "All 37 tools active. Use only when the task genuinely spans all domains.",
+                    "description": f"All {total_tool_count} tools active. Use only when the task genuinely spans all domains.",
                 },
             }
             chosen = _MODES.get(mode, _MODES["minimal"])
@@ -2512,7 +2514,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "avoid_tools": chosen["avoid_tools"],
                 "tool_count_active": len(chosen["recommended_tools"]),
                 "token_savings_note": (
-                    f"Using {len(chosen['recommended_tools'])} tools instead of 37 "
+                    f"Using {len(chosen['recommended_tools'])} tools instead of {total_tool_count} "
                     f"skips ~{len(chosen['avoid_tools']) * 60} schema tokens per session."
                 ),
             })

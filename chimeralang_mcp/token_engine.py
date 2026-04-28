@@ -85,34 +85,31 @@ class TokenBudgetManager:
         """Count tokens for a full message list in one API call."""
         if not messages:
             return 0
+        normalized_messages = [
+            {
+                "role": m.get("role", "user"),
+                "content": self._normalize_content(m.get("content", "")),
+            }
+            for m in messages
+        ]
         # Build cache key from all content
-        content_hash = self._hash(str(messages))
+        content_hash = self._hash(str(normalized_messages))
         if content_hash in self._cache:
             self._cache_hits += 1
             return self._cache[content_hash]
         self._cache_misses += 1
         if self._client and self._token_count_method == "api":
             try:
-                # Convert to Anthropic message format
-                anthropic_msgs = []
-                for m in messages:
-                    role = m.get("role", "user")
-                    content = m.get("content", "")
-                    if isinstance(content, list):
-                        # Handle multimodal content
-                        text_parts = [p.get("text", "") for p in content if p.get("type") == "text"]
-                        content = " ".join(text_parts)
-                    anthropic_msgs.append({"role": role, "content": str(content)})
                 result = self._client.beta.messages.count_tokens(
                     model="claude-opus-4-7",
-                    messages=anthropic_msgs,
+                    messages=normalized_messages,
                 )
                 count = result.usage.input_tokens
             except Exception:
-                count = sum(len(m.get("content", "") or "") // 4 for m in messages)
+                count = sum(len(m["content"]) // 4 for m in normalized_messages)
                 self._token_count_method = "estimate"
         else:
-            count = sum(len(m.get("content", "") or "") // 4 for m in messages)
+            count = sum(len(m["content"]) // 4 for m in normalized_messages)
         self._cache[content_hash] = count
         return count
 
@@ -136,6 +133,19 @@ class TokenBudgetManager:
     @staticmethod
     def _hash(text: str) -> str:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _normalize_content(content: Any) -> str:
+        if isinstance(content, list):
+            text_parts = []
+            for part in content:
+                if isinstance(part, dict):
+                    if part.get("type") == "text":
+                        text_parts.append(str(part.get("text", "")))
+                else:
+                    text_parts.append(str(part))
+            return " ".join(p for p in text_parts if p)
+        return str(content or "")
 
 
 # ---------------------------------------------------------------------------
