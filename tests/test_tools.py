@@ -1,13 +1,20 @@
 """test_tools.py — integration tests for chimera tools."""
 from __future__ import annotations
 
+import asyncio
+import json
 import unittest
 
 from chimeralang_mcp.server import (
-    _ok, _err, _tbm, _scorer,
+    _ok, _err, _tbm, _scorer, call_tool,
     _MODEL_PRICING, _DEFAULT_MODEL, _CostTracker,
 )
 from chimeralang_mcp.token_engine import get_token_budget_manager
+
+
+def _tool_payload(name: str, arguments: dict) -> dict:
+    result = asyncio.run(call_tool(name, arguments))
+    return json.loads(result.content[0].text)
 
 
 class TestChimeraOptimize(unittest.TestCase):
@@ -62,6 +69,26 @@ class TestChimeraOptimize(unittest.TestCase):
         self.assertIn("def foo():", work)
         self.assertNotIn("\x00CODE", work)
 
+    def test_quantum_optimize_outperforms_classic_on_focus_heavy_text(self):
+        """Quantum optimize should save more while keeping the release facts."""
+        text = (
+            "Narrative filler: this is clearly a broad overview of the roadmap and future possibilities.\n\n"
+            "Critical release details: bump pyproject.toml to 0.6.0, update __init__.py, and ensure publish.yml triggers on push to main.\n\n"
+            "More unrelated storytelling that is very broad and basically not needed for the current task."
+        )
+        classic = _tool_payload("chimera_optimize", {
+            "text": text,
+            "algorithm": "classic",
+        })
+        quantum = _tool_payload("chimera_optimize", {
+            "text": text,
+            "focus": "release version bump publish workflow",
+            "algorithm": "quantum",
+        })
+        self.assertIn("pyproject.toml", quantum["optimised_text"])
+        self.assertLess(quantum["optimised_chars"], classic["optimised_chars"])
+        self.assertEqual(quantum["algorithm"], "quantum")
+
 
 class TestChimeraCompress(unittest.TestCase):
     """chimera_compress tests."""
@@ -92,6 +119,23 @@ class TestChimeraCompress(unittest.TestCase):
         self.assertNotIn("∵", result)
         self.assertIn("nr.", result)   # "number" → "nr." was in test text
         self.assertIn("vs.", result)   # "versus" → "vs." was in test text
+
+    def test_quantum_compress_keeps_focus_terms(self):
+        """Quantum compress should preserve release-critical tokens."""
+        text = (
+            "We should broadly think about many things.\n\n"
+            "What matters now is version 0.6.0, pyproject.toml, and the publish workflow on push to main.\n\n"
+            "There is also a lot of unrelated brainstorming here."
+        )
+        payload = _tool_payload("chimera_compress", {
+            "text": text,
+            "level": "aggressive",
+            "focus": "version 0.6.0 pyproject publish workflow",
+            "algorithm": "quantum",
+        })
+        self.assertIn("0.6.0", payload["compressed_text"])
+        self.assertIn("publish", payload["compressed_text"].lower())
+        self.assertEqual(payload["algorithm"], "quantum")
 
 
 class TestChimeraBudget(unittest.TestCase):
@@ -174,6 +218,34 @@ class TestChimeraFracturePipeline(unittest.TestCase):
         self.assertGreaterEqual(budget_remaining, 0)
         self.assertIsInstance(quality_passed, bool)
 
+    def test_quantum_fracture_returns_real_compressed_outputs(self):
+        """Quantum fracture should return compressed artifacts, not just stats."""
+        messages = [
+            {"role": "user", "content": "Ship version 0.6.0 and keep the publish workflow intact."},
+            {"role": "assistant", "content": "Sure, I'd be happy to help with that. " * 20},
+            {"role": "tool", "content": "pyproject.toml version = 0.6.0; workflow: publish.yml triggers on push to main"},
+            {"role": "assistant", "content": "We also need to run tests and confirm the branch is synced before pushing."},
+        ]
+        documents = [
+            "Release note draft: this is very broad narrative filler. "
+            "Important: update __init__.py, update pyproject.toml, and verify publish.yml. "
+            "There is additional unrelated storytelling that should compress away."
+        ]
+        payload = _tool_payload("chimera_fracture", {
+            "messages": messages,
+            "documents": documents,
+            "token_budget": 120,
+            "allow_lossy": True,
+            "focus": "version 0.6.0 publish workflow tests",
+            "algorithm": "quantum",
+        })
+        flattened = json.dumps(payload["compressed_messages"])
+        self.assertEqual(payload["algorithm"], "quantum")
+        self.assertTrue(payload["quality_passed"])
+        self.assertTrue(payload["optimized_documents"])
+        self.assertIn("0.6.0", flattened)
+        self.assertIn("publish", flattened.lower())
+
 
 class TestCostTracker(unittest.TestCase):
     """_CostTracker unit tests."""
@@ -236,6 +308,30 @@ class TestChimera_cost_estimate(unittest.TestCase):
 
     def test_default_model_exists(self):
         self.assertIn(_DEFAULT_MODEL, _MODEL_PRICING)
+
+
+class TestChimeraCSM(unittest.TestCase):
+    """chimera_csm tests."""
+
+    def test_quantum_csm_beats_classic_input_tokens(self):
+        """Quantum csm should produce a smaller optimized input than classic for noisy context."""
+        messages = [
+            {"role": "assistant", "content": "Sure, I'd be happy to help with that. " * 15},
+            {"role": "tool", "content": "publish.yml triggers on push to main; pyproject.toml version = 0.6.0"},
+        ]
+        classic = _tool_payload("chimera_csm", {
+            "prompt": "Ship version 0.6.0 and verify the publish workflow before push.",
+            "messages": messages,
+            "algorithm": "classic",
+        })
+        quantum = _tool_payload("chimera_csm", {
+            "prompt": "Ship version 0.6.0 and verify the publish workflow before push.",
+            "messages": messages,
+            "algorithm": "quantum",
+            "focus": "version 0.6.0 publish workflow",
+        })
+        self.assertLessEqual(quantum["total_input_tokens"], classic["total_input_tokens"])
+        self.assertEqual(quantum["algorithm"], "quantum")
 
 
 if __name__ == "__main__":

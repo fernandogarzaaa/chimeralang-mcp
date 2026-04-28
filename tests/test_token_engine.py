@@ -69,6 +69,90 @@ class TestTokenBudgetManager(unittest.TestCase):
             self.assertIn("cache_size", stats)
             self.assertEqual(stats["cache_size"], 1)
 
+    def test_singleton_reuses_same_instance(self):
+        """TokenBudgetManager should reuse the same singleton instance."""
+        with patch.dict("os.environ", {}, clear=True):
+            from chimeralang_mcp.token_engine import TokenBudgetManager
+            TokenBudgetManager._instance = None
+            first = TokenBudgetManager()
+            second = TokenBudgetManager()
+            self.assertIs(first, second)
+
+    def test_count_messages_normalizes_text_parts(self):
+        """List-based multimodal content should count text parts instead of zero."""
+        with patch.dict("os.environ", {}, clear=True):
+            from chimeralang_mcp.token_engine import TokenBudgetManager
+            TokenBudgetManager._instance = None
+            tbm = TokenBudgetManager()
+            messages = [{"role": "user", "content": [{"type": "text", "text": "hello world"}]}]
+            self.assertGreater(tbm.count_messages(messages), 0)
+
+
+class TestQuantumCompressionEngine(unittest.TestCase):
+    """Quantum compression engine tests."""
+
+    def test_optimize_keeps_focus_and_drops_irrelevant_filler(self):
+        """Focused optimization should keep relevant release facts and shrink fluff."""
+        from chimeralang_mcp.token_engine import get_quantum_compression_engine
+
+        engine = get_quantum_compression_engine()
+        text = (
+            "Marketing overview: this project is very exciting and clearly has many possibilities.\n\n"
+            "Release checklist: bump pyproject.toml to 0.6.0, update __init__.py, and confirm the publish workflow runs on push to main.\n\n"
+            "Additional narrative: as you can see, the branding story is basically unrelated to the release mechanics."
+        )
+        result = engine.optimize_text(
+            text,
+            focus="release version bump publish workflow",
+            strategies=["whitespace", "dedup_sentences", "strip_filler"],
+            level="aggressive",
+        )
+        self.assertIn("pyproject.toml", result.text)
+        self.assertIn("publish workflow", result.text.lower())
+        self.assertNotIn("branding story", result.text.lower())
+        self.assertLess(result.compressed_tokens, result.original_tokens)
+
+    def test_optimize_preserves_code_blocks(self):
+        """Quantum optimization should preserve fenced code exactly."""
+        from chimeralang_mcp.token_engine import get_quantum_compression_engine
+
+        engine = get_quantum_compression_engine()
+        text = (
+            "Context before.\n\n"
+            "```python\n"
+            "def release_version():\n"
+            "    return '0.6.0'\n"
+            "```\n\n"
+            "A very verbose explanation that should shrink aggressively."
+        )
+        result = engine.optimize_text(text, focus="release version", level="aggressive")
+        self.assertIn("def release_version():", result.text)
+        self.assertIn("0.6.0", result.text)
+
+    def test_compress_messages_respects_budget_pressure(self):
+        """Focused message compression should keep critical release facts under pressure."""
+        from chimeralang_mcp.token_engine import MessageImportanceScorer, get_quantum_compression_engine
+
+        engine = get_quantum_compression_engine()
+        scorer = MessageImportanceScorer()
+        messages = [
+            {"role": "user", "content": "Please ship version 0.6.0 and make sure PyPI publish still works."},
+            {"role": "assistant", "content": "Sure, I'd be happy to help with that. " * 25},
+            {"role": "tool", "content": "pyproject.toml version = 0.6.0; workflow: publish.yml triggers on push to main"},
+            {"role": "assistant", "content": "We should also remember the key release steps and verify tests before pushing."},
+        ]
+        result = engine.compress_messages(
+            messages,
+            focus="version 0.6.0 pypi publish workflow",
+            scorer=scorer,
+            token_budget=55,
+            allow_lossy=True,
+        )
+        flattened = "\n".join(m["content"] for m in result.messages)
+        self.assertIn("0.6.0", flattened)
+        self.assertIn("publish", flattened.lower())
+        self.assertLess(result.compressed_tokens, result.original_tokens)
+
 
 class TestMessageImportanceScorer(unittest.TestCase):
     """MessageImportanceScorer tests."""
@@ -135,6 +219,19 @@ class TestMessageImportanceScorer(unittest.TestCase):
         prose = {"role": "assistant", "content": "Sure, I'd be happy to help you with that! As you can see, this is a very long verbose response that goes on and on about something that could be said much more concisely. Let me walk you through each step in detail." * 3}
         score = scorer.score(prose, 0, 5)
         self.assertLess(score, 0.5)
+
+    def test_focus_overlap_scores_higher(self):
+        """Messages matching the active task focus should outrank unrelated prose."""
+        from chimeralang_mcp.token_engine import MessageImportanceScorer
+
+        scorer = MessageImportanceScorer()
+        focused = {"role": "assistant", "content": "Bump pyproject.toml to 0.6.0 and verify publish.yml."}
+        unrelated = {"role": "assistant", "content": "We can also think broadly about future branding possibilities."}
+        focus = "version bump publish workflow"
+        self.assertGreater(
+            scorer.score(focused, 3, 4, focus=focus),
+            scorer.score(unrelated, 3, 4, focus=focus),
+        )
 
 
 if __name__ == "__main__":

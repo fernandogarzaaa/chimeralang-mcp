@@ -114,12 +114,14 @@ Most stateful tools accept an optional `namespace` and persist data to `~/.chime
 
 ### Token Budget, Cost, and Workflow
 
+The token-efficiency stack now defaults to a deterministic, quantum-inspired compressor: it scores text spans by salience amplitude, boosts shared entities through entanglement, suppresses redundant spans through interference, and then "measures" the best units under a token budget. `chimera_optimize`, `chimera_compress`, `chimera_fracture`, and `chimera_csm` all accept `algorithm="classic|quantum"` and optional `focus` text so compression can stay task-aware instead of blindly deleting tokens.
+
 | Tool | What it does |
 |---|---|
-| `chimera_compress` | Compress text using abbreviation and shorthand strategies |
-| `chimera_optimize` | Aggressive text cleanup and extraction passes for large text or code blobs |
-| `chimera_fracture` | Full pipeline: optimize docs plus compress messages plus quality gate |
-| `chimera_score` | Rank messages by importance for lossy compression decisions |
+| `chimera_compress` | Query-aware text compression with legacy rewrite fallback |
+| `chimera_optimize` | Aggressive salience extraction for large text or code blobs |
+| `chimera_fracture` | Full pipeline: optimize docs plus compress messages plus budget gate |
+| `chimera_score` | Rank messages by importance for lossy compression decisions, with optional task focus |
 | `chimera_budget` | Report current token usage against a budget |
 | `chimera_cost_estimate` | Deterministic cost estimate for any supported model |
 | `chimera_cost_track` | Record before and after compression events to the tracker |
@@ -271,6 +273,12 @@ end
 ---
 
 ## Changelog
+
+### 0.6.0
+- Add a deterministic quantum-inspired token compression engine with salience amplitude, entanglement boosts, redundancy interference, and budgeted measurement
+- Make `chimera_optimize`, `chimera_compress`, `chimera_fracture`, and `chimera_csm` query-aware through optional `focus` input plus `classic|quantum` algorithm selection
+- Upgrade `chimera_fracture` to return the actual optimized documents and compressed message artifacts instead of only aggregate stats
+- Fix `TokenBudgetManager` singleton behavior so token-count caches are reused across tool calls
 
 ### 0.5.0
 - Add a material-pack subsystem with pinned source manifests, pack builders, a loader, and offline `sync` / `build` / `status` / `licenses` CLI commands

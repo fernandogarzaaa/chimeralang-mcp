@@ -44,7 +44,10 @@ from chimera.claude_adapter import ClaudeConstraintMiddleware, ToolCallSpec
 from chimeralang_mcp.token_engine import (
     TokenBudgetManager,
     MessageImportanceScorer,
+    extract_focus_terms,
     get_token_budget_manager,
+    get_quantum_compression_engine,
+    normalize_content,
 )
 from chimeralang_mcp.envelope import ResultEnvelope, merge_envelopes
 from chimeralang_mcp.materials import MaterialRegistry, get_material_registry
@@ -457,6 +460,7 @@ _middleware    = ClaudeConstraintMiddleware(confidence_threshold=0.7)
 _detector      = HallucinationDetector()
 _tbm           = get_token_budget_manager()
 _scorer        = MessageImportanceScorer()
+_quantum       = get_quantum_compression_engine()
 _cost_tracker  = _CostTracker()
 server         = Server("chimeralang-mcp")
 _store         = PersistentNamespaceStore()
@@ -473,6 +477,25 @@ _session_budget: dict[str, Any] = {
     "locked_at": None,
     "tokens_generated": 0,
 }
+
+
+def _resolve_focus(
+    arguments: dict[str, Any],
+    *,
+    prompt: str = "",
+    messages: list[dict[str, Any]] | None = None,
+) -> str:
+    focus = str(arguments.get("focus", "") or "").strip()
+    if focus:
+        return focus
+    if prompt:
+        return prompt
+    for message in reversed(messages or []):
+        if message.get("role") == "user":
+            content = normalize_content(message.get("content", ""))
+            if content.strip():
+                return content
+    return ""
 
 # ── AGI component singletons (lazy-initialized) ───────────────────────────
 _causal_reasoning:    _CausalReasoning | None    = None
@@ -1505,6 +1528,16 @@ async def list_tools() -> list[Tool]:
                         ),
                         "default": False,
                     },
+                    "focus": {
+                        "type": "string",
+                        "description": "Optional task focus/query. Used by quantum compression to retain the most relevant facts.",
+                    },
+                    "algorithm": {
+                        "type": "string",
+                        "enum": ["quantum", "classic"],
+                        "description": "Compression algorithm. quantum = query-aware salience selection. classic = legacy whitespace/filler compression.",
+                        "default": "quantum",
+                    },
                 },
             },
         ),
@@ -1540,6 +1573,16 @@ async def list_tools() -> list[Tool]:
                         "description": "Skip optimisation inside code fences (``` blocks). Default true.",
                         "default": True,
                     },
+                    "focus": {
+                        "type": "string",
+                        "description": "Optional task focus/query. quantum mode uses it to keep the most relevant units.",
+                    },
+                    "algorithm": {
+                        "type": "string",
+                        "enum": ["quantum", "classic"],
+                        "description": "Optimisation algorithm. quantum = salience selection. classic = legacy line/filler cleanup.",
+                        "default": "quantum",
+                    },
                 },
                 "required": ["text"],
             },
@@ -1564,6 +1607,16 @@ async def list_tools() -> list[Tool]:
                         "type": "boolean",
                         "description": "Skip compression inside code fences (``` blocks). Default true.",
                         "default": True,
+                    },
+                    "focus": {
+                        "type": "string",
+                        "description": "Optional task focus/query. quantum mode uses it to preserve the most relevant content.",
+                    },
+                    "algorithm": {
+                        "type": "string",
+                        "enum": ["quantum", "classic"],
+                        "description": "Compression algorithm. quantum = structural salience compression. classic = legacy rewrite-only compression.",
+                        "default": "quantum",
                     },
                 },
                 "required": ["text"],
@@ -1601,6 +1654,10 @@ async def list_tools() -> list[Tool]:
                     "messages": {
                         "type": "array",
                         "description": "Messages to score [{role, content}]",
+                    },
+                    "focus": {
+                        "type": "string",
+                        "description": "Optional task focus/query. Messages aligned with this focus score higher.",
                     },
                 },
                 "required": ["messages"],
@@ -1712,6 +1769,16 @@ async def list_tools() -> list[Tool]:
                             "Default: auto"
                         ),
                         "default": "auto",
+                    },
+                    "focus": {
+                        "type": "string",
+                        "description": "Optional task focus/query. Defaults to prompt when omitted.",
+                    },
+                    "algorithm": {
+                        "type": "string",
+                        "enum": ["quantum", "classic"],
+                        "description": "Optimization algorithm. quantum = query-aware compression. classic = legacy rewrite-only compression.",
+                        "default": "quantum",
                     },
                 },
                 "required": ["prompt"],
@@ -3017,141 +3084,216 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         elif name == "chimera_fracture":
             import re as _re
 
-            messages     = arguments.get("messages", [])
-            documents    = arguments.get("documents", [])
+            messages = arguments.get("messages", [])
+            documents = arguments.get("documents", [])
             token_budget = int(arguments.get("token_budget", 1500))
-            allow_lossy  = bool(arguments.get("allow_lossy", False))
+            allow_lossy = bool(arguments.get("allow_lossy", False))
+            algorithm = str(arguments.get("algorithm", "quantum")).lower()
+            focus = _resolve_focus(arguments, messages=messages)
 
-            def _compress_message_history(msgs: list[dict[str, Any]]) -> str:
-                if not msgs:
-                    return ""
-                msg_text = "\n".join(
-                    f"[{m.get('role', 'user')}]: {m.get('content', '')}"
-                    for m in msgs
-                )
-                compressed = _re.sub(r"[ \t]+", " ", msg_text)
-                compressed = _re.sub(r"\n{3,}", "\n\n", compressed).strip()
-                for pat, repl in {
-                    r"\bdo not\b": "don't", r"\bdoes not\b": "doesn't",
-                    r"\bdid not\b": "didn't", r"\bcannot\b": "can't",
-                    r"\bwill not\b": "won't", r"\bwould not\b": "wouldn't",
-                    r"\bshould not\b": "shouldn't", r"\bcould not\b": "couldn't",
-                    r"\bare not\b": "aren't", r"\bwas not\b": "wasn't",
-                    r"\bwere not\b": "weren't", r"\bhave not\b": "haven't",
-                    r"\bhas not\b": "hasn't", r"\bhad not\b": "hadn't",
-                    r"\bit is\b": "it's", r"\bthat is\b": "that's",
-                }.items():
-                    compressed = _re.sub(pat, repl, compressed, flags=_re.IGNORECASE)
-                return compressed
+            if algorithm == "classic":
+                def _compress_message_history(msgs: list[dict[str, Any]]) -> str:
+                    if not msgs:
+                        return ""
+                    msg_text = "\n".join(
+                        f"[{m.get('role', 'user')}]: {m.get('content', '')}"
+                        for m in msgs
+                    )
+                    compressed = _re.sub(r"[ \t]+", " ", msg_text)
+                    compressed = _re.sub(r"\n{3,}", "\n\n", compressed).strip()
+                    for pat, repl in {
+                        r"\bdo not\b": "don't", r"\bdoes not\b": "doesn't",
+                        r"\bdid not\b": "didn't", r"\bcannot\b": "can't",
+                        r"\bwill not\b": "won't", r"\bwould not\b": "wouldn't",
+                        r"\bshould not\b": "shouldn't", r"\bcould not\b": "couldn't",
+                        r"\bare not\b": "aren't", r"\bwas not\b": "wasn't",
+                        r"\bwere not\b": "weren't", r"\bhave not\b": "haven't",
+                        r"\bhas not\b": "hasn't", r"\bhad not\b": "hadn't",
+                        r"\bit is\b": "it's", r"\bthat is\b": "that's",
+                    }.items():
+                        compressed = _re.sub(pat, repl, compressed, flags=_re.IGNORECASE)
+                    return compressed
+
+                total_start = time.time()
+                stats: dict[str, Any] = {
+                    "documents_input": sum(len(d) for d in documents),
+                    "messages_input": len(messages),
+                    "tokens_input": _tbm.count_messages(messages),
+                }
+
+                optimised_docs: list[str] = []
+                for doc in documents:
+                    d = _re.sub(r"[ \t]+", " ", doc)
+                    d = _re.sub(r"\n{3,}", "\n\n", d).strip()
+                    for pat in [
+                        r"\bplease note that\b", r"\bit is worth noting that\b",
+                        r"\bit should be noted that\b", r"\bin order to\b",
+                        r"\bbasically\b", r"\bactually\b", r"\bvery\b",
+                        r"\bjust\b", r"\bsimply\b", r"\bquite\b",
+                        r"\bof course\b", r"\bneedless to say\b",
+                    ]:
+                        d = _re.sub(pat, "", d, flags=_re.IGNORECASE)
+                    d = _re.sub(r"[ \t]{2,}", " ", d).strip()
+                    optimised_docs.append(d)
+
+                stats["documents_optimised"] = sum(len(d) for d in optimised_docs)
+                messages_compressed = _compress_message_history(messages)
+
+                tokens_after = _tbm.count_tokens(messages_compressed) + _tbm.count_texts(optimised_docs)
+                budget_remaining = max(0, token_budget - tokens_after)
+                quality_passed = tokens_after <= token_budget
+                lossy_dropped_count = 0
+                dropped_indexes: list[int] = []
+
+                if not quality_passed and allow_lossy:
+                    original_messages = list(messages)
+                    ranked = _scorer.rank(original_messages, focus=focus)
+                    min_keep = 2
+                    dropped_scores: list[float] = []
+                    kept = original_messages
+                    for entry in ranked:
+                        if quality_passed or len(original_messages) - len(dropped_indexes) <= min_keep:
+                            break
+                        dropped_indexes.append(entry["index"])
+                        dropped_scores.append(entry["score"])
+                        kept = [m for i, m in enumerate(original_messages) if i not in set(dropped_indexes)]
+                        if not kept:
+                            break
+                        tombstone = {
+                            "role": "system",
+                            "content": (
+                                f"[{len(dropped_indexes)} messages omitted - "
+                                f"low importance scores: {', '.join(str(s) for s in dropped_scores)}]"
+                            ),
+                        }
+                        messages = kept + [tombstone]
+                        lossy_dropped_count = len(dropped_indexes)
+                        messages_compressed = _compress_message_history(messages)
+                        tokens_after = _tbm.count_tokens(messages_compressed) + _tbm.count_texts(optimised_docs)
+                        budget_remaining = max(0, token_budget - tokens_after)
+                        quality_passed = tokens_after <= token_budget
+                        if quality_passed:
+                            break
+
+                stats["duration_ms"] = round((time.time() - total_start) * 1000, 1)
+
+                return _ok({
+                    "quality_passed": quality_passed,
+                    "budget_remaining": budget_remaining,
+                    "tokens_input": stats["tokens_input"],
+                    "tokens_after_pipeline": tokens_after,
+                    "documents_input": stats["documents_input"],
+                    "documents_optimised": stats["documents_optimised"],
+                    "messages_input": stats["messages_input"],
+                    "lossy_dropped_count": lossy_dropped_count,
+                    "compression_time_ms": stats["duration_ms"],
+                    "token_count_method": _tbm.get_stats()["token_count_method"],
+                    "algorithm": "classic",
+                    "focus_terms": extract_focus_terms(focus),
+                    "optimized_documents": optimised_docs,
+                    "compressed_messages": messages,
+                    "dropped_message_indexes": dropped_indexes,
+                    "compressed_message_history": messages_compressed,
+                })
 
             total_start = time.time()
-            stats: dict[str, Any] = {
-                "documents_input": sum(len(d) for d in documents),
-                "messages_input":  len(messages),
-                "tokens_input":    _tbm.count_messages(messages),
-            }
+            optimized_documents: list[str] = []
+            document_results = []
+            for document in documents:
+                result = _quantum.optimize_text(
+                    document,
+                    focus=focus,
+                    preserve_code=True,
+                    strategies=["whitespace", "dedup_sentences", "strip_filler", "collapse_lists"],
+                    level="aggressive",
+                )
+                optimized_documents.append(result.text)
+                document_results.append(result)
 
-            # Step 1: optimize each document
-            optimised_docs: list[str] = []
-            for doc in documents:
-                # Quick optimise: whitespace + strip_filler (skip dedup_sentences/collapse_lists for speed)
-                d = _re.sub(r"[ \t]+", " ", doc)
-                d = _re.sub(r"\n{3,}", "\n\n", d).strip()
-                for pat in [
-                    r"\bplease note that\b", r"\bit is worth noting that\b",
-                    r"\bit should be noted that\b", r"\bin order to\b",
-                    r"\bbasically\b", r"\bactually\b", r"\bvery\b",
-                    r"\bjust\b", r"\bsimply\b", r"\bquite\b",
-                    r"\bof course\b", r"\bneedless to say\b",
-                ]:
-                    d = _re.sub(pat, "", d, flags=_re.IGNORECASE)
-                d = _re.sub(r"[ \t]{2,}", " ", d).strip()
-                optimised_docs.append(d)
-
-            stats["documents_optimised"] = sum(len(d) for d in optimised_docs)
-
-            # Step 2: compress messages (lossless first)
-            messages_compressed = _compress_message_history(messages)
-
-            tokens_after = _tbm.count_tokens(messages_compressed) + _tbm.count_texts(optimised_docs)
-            stats["tokens_after_pipeline"] = tokens_after
+            documents_input = sum(len(document) for document in documents)
+            documents_optimised = sum(len(document) for document in optimized_documents)
+            document_tokens = _tbm.count_texts(optimized_documents)
+            message_budget = max(64, token_budget - document_tokens)
+            message_result = _quantum.compress_messages(
+                messages,
+                focus=focus,
+                scorer=_scorer,
+                token_budget=message_budget,
+                allow_lossy=allow_lossy,
+            )
+            tokens_input = _tbm.count_messages(messages)
+            tokens_after = _tbm.count_messages(message_result.messages) + document_tokens
             budget_remaining = max(0, token_budget - tokens_after)
             quality_passed = tokens_after <= token_budget
-            lossy_dropped_count = 0
-
-            # Step 3: lossy if needed and opted in
-            if not quality_passed and allow_lossy:
-                original_messages = list(messages)
-                ranked = _scorer.rank(original_messages)
-                min_keep = 2
-                dropped_indexes: set[int] = set()
-                dropped_scores: list[float] = []
-                kept = original_messages
-                for entry in ranked:
-                    if quality_passed or len(original_messages) - len(dropped_indexes) <= min_keep:
-                        break
-                    dropped_indexes.add(entry["index"])
-                    dropped_scores.append(entry["score"])
-                    kept = [m for i, m in enumerate(original_messages)
-                            if i not in dropped_indexes]
-                    if not kept:
-                        break
-                    tombstone = {
-                        "role": "system",
-                        "content": (
-                            f"[{len(dropped_indexes)} messages omitted - "
-                            f"low importance scores: {', '.join(str(s) for s in dropped_scores)}]"
-                        ),
-                    }
-                    messages = kept + [tombstone]
-                    lossy_dropped_count = len(dropped_indexes)
-                    messages_compressed = _compress_message_history(messages)
-                    tokens_after = _tbm.count_tokens(messages_compressed) + _tbm.count_texts(optimised_docs)
-                    budget_remaining = max(0, token_budget - tokens_after)
-                    quality_passed = tokens_after <= token_budget
-                    if quality_passed:
-                        break
-
-            stats["tokens_after_pipeline"] = tokens_after
-            stats["budget_remaining"] = budget_remaining
-            stats["lossy_dropped_count"] = lossy_dropped_count
-            stats["duration_ms"] = round((time.time() - total_start) * 1000, 1)
+            compression_time_ms = round((time.time() - total_start) * 1000, 1)
 
             return _ok({
-                "quality_passed":      quality_passed,
-                "budget_remaining":    budget_remaining,
-                "tokens_input":        stats["tokens_input"],
+                "quality_passed": quality_passed,
+                "budget_remaining": budget_remaining,
+                "tokens_input": tokens_input,
                 "tokens_after_pipeline": tokens_after,
-                "documents_input":    stats["documents_input"],
-                "documents_optimised": stats["documents_optimised"],
-                "messages_input":      stats["messages_input"],
-                "lossy_dropped_count": lossy_dropped_count,
-                "compression_time_ms": stats["duration_ms"],
+                "tokens_saved": max(0, tokens_input + _tbm.count_texts(documents) - tokens_after),
+                "documents_input": documents_input,
+                "documents_optimised": documents_optimised,
+                "messages_input": len(messages),
+                "lossy_dropped_count": len(message_result.dropped_indexes),
+                "compression_time_ms": compression_time_ms,
                 "token_count_method": _tbm.get_stats()["token_count_method"],
+                "algorithm": "quantum",
+                "focus_terms": message_result.focus_terms,
+                "optimized_documents": optimized_documents,
+                "compressed_messages": message_result.messages,
+                "compressed_message_history": message_result.compressed_history,
+                "compressed_message_indexes": message_result.compressed_indexes,
+                "dropped_message_indexes": message_result.dropped_indexes,
+                "units_kept": {
+                    "documents": sum(result.units_kept for result in document_results),
+                    "document_units_total": sum(result.units_total for result in document_results),
+                },
             })
 
         # ── chimera_optimize ──────────────────────────────────────────────
         elif name == "chimera_optimize":
             import re as _re
 
-            _FILLER = [
-                r"\bplease note that\b", r"\bit is worth noting that\b",
-                r"\bit should be noted that\b", r"\bin order to\b",
-                r"\bbasically\b", r"\bactually\b", r"\bvery\b",
-                r"\bjust\b", r"\bsimply\b", r"\bquite\b",
-                r"\bof course\b", r"\bneedless to say\b",
-                r"\bas you can see\b", r"\bclearly\b",
-            ]
-
-            text       = arguments["text"]
+            text = arguments["text"]
             strategies = arguments.get("strategies") or ["whitespace", "dedup_sentences", "strip_filler"]
             preserve_code = bool(arguments.get("preserve_code", True))
+            algorithm = str(arguments.get("algorithm", "quantum")).lower()
+            focus = _resolve_focus(arguments, prompt=text)
+
+            if algorithm == "quantum":
+                result = _quantum.optimize_text(
+                    text,
+                    focus=focus,
+                    preserve_code=preserve_code,
+                    strategies=strategies,
+                    level="aggressive",
+                )
+                saved = result.original_chars - result.compressed_chars
+                ratio = round(saved / result.original_chars, 4) if result.original_chars else 0.0
+                return _ok({
+                    "optimised_text": result.text,
+                    "original_chars": result.original_chars,
+                    "optimised_chars": result.compressed_chars,
+                    "chars_saved": saved,
+                    "reduction_ratio": ratio,
+                    "estimated_tokens_before": result.original_tokens,
+                    "estimated_tokens_after": result.compressed_tokens,
+                    "estimated_tokens_saved": max(0, result.original_tokens - result.compressed_tokens),
+                    "passes_applied": result.passes_applied,
+                    "code_blocks_preserved": result.code_blocks_preserved,
+                    "algorithm": "quantum",
+                    "focus_terms": result.focus_terms,
+                    "units_total": result.units_total,
+                    "units_kept": result.units_kept,
+                })
+
             original_len = len(text)
-            result_text  = text
+            result_text = text
             log: list[str] = []
             code_blocks: list[str] = []
 
-            # Extract code fences if preserving
             if preserve_code:
                 def _stash(m: "_re.Match[str]") -> str:
                     code_blocks.append(m.group(0))
@@ -3180,7 +3322,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
             if "strip_filler" in strategies:
                 before = len(result_text)
-                for pat in _FILLER:
+                for pat in [
+                    r"\bplease note that\b", r"\bit is worth noting that\b",
+                    r"\bit should be noted that\b", r"\bin order to\b",
+                    r"\bbasically\b", r"\bactually\b", r"\bvery\b",
+                    r"\bjust\b", r"\bsimply\b", r"\bquite\b",
+                    r"\bof course\b", r"\bneedless to say\b",
+                    r"\bas you can see\b", r"\bclearly\b",
+                ]:
                     result_text = _re.sub(pat, "", result_text, flags=_re.IGNORECASE)
                 result_text = _re.sub(r"[ \t]{2,}", " ", result_text).strip()
                 log.append(f"strip_filler: -{before - len(result_text)} chars")
@@ -3211,56 +3360,60 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             ratio = round(saved / original_len, 4) if original_len else 0.0
 
             return _ok({
-                "optimised_text":    result_text,
-                "original_chars":    original_len,
-                "optimised_chars":   len(result_text),
-                "chars_saved":       saved,
-                "reduction_ratio":   ratio,
+                "optimised_text": result_text,
+                "original_chars": original_len,
+                "optimised_chars": len(result_text),
+                "chars_saved": saved,
+                "reduction_ratio": ratio,
                 "estimated_tokens_saved": max(0, round(saved / 4)),
-                "passes_applied":     log,
+                "passes_applied": log,
                 "code_blocks_preserved": len(code_blocks),
+                "algorithm": "classic",
+                "focus_terms": extract_focus_terms(focus),
             })
 
         # ── chimera_compress ──────────────────────────────────────────────
         elif name == "chimera_compress":
             import re as _re
 
-            _CONTRACTIONS_MEDIUM = {
-                r"\bdo not\b": "don't",     r"\bdoes not\b": "doesn't",
-                r"\bdid not\b": "didn't",   r"\bcannot\b": "can't",
-                r"\bwill not\b": "won't",   r"\bwould not\b": "wouldn't",
-                r"\bshould not\b": "shouldn't", r"\bcould not\b": "couldn't",
-                r"\bare not\b": "aren't",   r"\bwas not\b": "wasn't",
-                r"\bwere not\b": "weren't", r"\bhave not\b": "haven't",
-                r"\bhas not\b": "hasn't",   r"\bhad not\b": "hadn't",
-                r"\bI am\b": "I'm",         r"\bI have\b": "I've",
-                r"\bI will\b": "I'll",      r"\bI would\b": "I'd",
-                r"\bit is\b": "it's",       r"\bthat is\b": "that's",
-                r"\bthere is\b": "there's", r"\bthey are\b": "they're",
-                r"\bwe are\b": "we're",     r"\byou are\b": "you're",
-            }
-
-            _SYMBOLS_AGGRESSIVE = {
-                # Removed ∴ ∵ & w/ w/o — these break Claude's comprehension of its own compressed history.
-                # Keep only unambiguous, Claude-readable substitutions.
-                r"\bapproximately\b": "≈",
-                r"\bgreater than\b": ">",
-                r"\bless than\b": "<",
-                r"\bequals\b": "=",
-                r"\bnumber\b": "nr.",
-                r"\bversus\b": "vs.",
-                r"\bregarding\b": "re:",
-                r"\bfor example\b": "e.g.",
-                r"\bthat is\b": "i.e.",
-                r"\betcetera\b": "etc.",
-            }
-
-            text          = arguments["text"]
-            level         = arguments.get("level", "medium")
+            text = arguments["text"]
+            level = arguments.get("level", "medium")
             preserve_code = bool(arguments.get("preserve_code", True))
-            original_len  = len(text)
+            algorithm = str(arguments.get("algorithm", "quantum")).lower()
+            focus = _resolve_focus(arguments, prompt=text)
 
-            # Extract code fences if preserving
+            if algorithm == "quantum":
+                strategies = ["whitespace", "strip_filler"]
+                if level in ("medium", "aggressive"):
+                    strategies.append("dedup_sentences")
+                result = _quantum.optimize_text(
+                    text,
+                    focus=focus,
+                    preserve_code=preserve_code,
+                    strategies=strategies,
+                    level=level,
+                )
+                saved = result.original_chars - result.compressed_chars
+                ratio = round(saved / result.original_chars, 4) if result.original_chars else 0.0
+                return _ok({
+                    "compressed_text": result.text,
+                    "level": level,
+                    "original_chars": result.original_chars,
+                    "compressed_chars": result.compressed_chars,
+                    "chars_saved": saved,
+                    "compression_ratio": ratio,
+                    "estimated_tokens_before": result.original_tokens,
+                    "estimated_tokens_after": result.compressed_tokens,
+                    "estimated_tokens_saved": max(0, result.original_tokens - result.compressed_tokens),
+                    "code_blocks_preserved": result.code_blocks_preserved,
+                    "algorithm": "quantum",
+                    "focus_terms": result.focus_terms,
+                    "units_total": result.units_total,
+                    "units_kept": result.units_kept,
+                })
+
+            original_len = len(text)
+
             code_blocks: list[str] = []
             work = text
             if preserve_code:
@@ -3269,22 +3422,43 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     return f"\x00CODE{len(code_blocks) - 1}\x00"
                 work = _re.sub(r"```[\s\S]*?```", _stash, work)
 
-            # light: normalise whitespace
             work = _re.sub(r"[ \t]+", " ", work)
             work = _re.sub(r"\n{3,}", "\n\n", work).strip()
 
             if level in ("medium", "aggressive"):
-                for pat, repl in _CONTRACTIONS_MEDIUM.items():
+                for pat, repl in {
+                    r"\bdo not\b": "don't", r"\bdoes not\b": "doesn't",
+                    r"\bdid not\b": "didn't", r"\bcannot\b": "can't",
+                    r"\bwill not\b": "won't", r"\bwould not\b": "wouldn't",
+                    r"\bshould not\b": "shouldn't", r"\bcould not\b": "couldn't",
+                    r"\bare not\b": "aren't", r"\bwas not\b": "wasn't",
+                    r"\bwere not\b": "weren't", r"\bhave not\b": "haven't",
+                    r"\bhas not\b": "hasn't", r"\bhad not\b": "hadn't",
+                    r"\bI am\b": "I'm", r"\bI have\b": "I've",
+                    r"\bI will\b": "I'll", r"\bI would\b": "I'd",
+                    r"\bit is\b": "it's", r"\bthat is\b": "that's",
+                    r"\bthere is\b": "there's", r"\bthey are\b": "they're",
+                    r"\bwe are\b": "we're", r"\byou are\b": "you're",
+                }.items():
                     work = _re.sub(pat, repl, work, flags=_re.IGNORECASE)
 
             if level == "aggressive":
-                for pat, repl in _SYMBOLS_AGGRESSIVE.items():
+                for pat, repl in {
+                    r"\bapproximately\b": "≈",
+                    r"\bgreater than\b": ">",
+                    r"\bless than\b": "<",
+                    r"\bequals\b": "=",
+                    r"\bnumber\b": "nr.",
+                    r"\bversus\b": "vs.",
+                    r"\bregarding\b": "re:",
+                    r"\bfor example\b": "e.g.",
+                    r"\bthat is\b": "i.e.",
+                    r"\betcetera\b": "etc.",
+                }.items():
                     work = _re.sub(pat, repl, work, flags=_re.IGNORECASE)
-                # strip redundant punctuation runs
                 work = _re.sub(r"\.{2,}", "…", work)
                 work = _re.sub(r"\s+([,;:!?])", r"\1", work)
 
-            # Restore code blocks
             if preserve_code:
                 for i, block in enumerate(code_blocks):
                     work = work.replace(f"\x00CODE{i}\x00", block)
@@ -3294,14 +3468,16 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             ratio          = round(saved / original_len, 4) if original_len else 0.0
 
             return _ok({
-                "compressed_text":   work,
-                "level":             level,
-                "original_chars":    original_len,
-                "compressed_chars":  compressed_len,
-                "chars_saved":       saved,
+                "compressed_text": work,
+                "level": level,
+                "original_chars": original_len,
+                "compressed_chars": compressed_len,
+                "chars_saved": saved,
                 "compression_ratio": ratio,
                 "estimated_tokens_saved": max(0, round(saved / 4)),
                 "code_blocks_preserved": len(code_blocks),
+                "algorithm": "classic",
+                "focus_terms": extract_focus_terms(focus),
             })
 
         # ── chimera_budget ────────────────────────────────────────────────
@@ -3331,13 +3507,16 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         # ── chimera_score ────────────────────────────────────────────────
         elif name == "chimera_score":
             messages = arguments.get("messages", [])
+            focus = _resolve_focus(arguments, messages=messages)
             if not messages:
                 return _ok([])
-            ranked = _scorer.rank(messages)
+            ranked = _scorer.rank(messages, focus=focus)
             return _ok({
                 "scores": ranked,
                 "total_messages": len(messages),
                 "token_count_method": _tbm.get_stats()["token_count_method"],
+                "algorithm": "quantum",
+                "focus_terms": extract_focus_terms(focus),
             })
 
         # ── AGI: chimera_causal ────────────────────────────────────────────
@@ -3828,56 +4007,67 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         elif name == "chimera_csm":
             import re as _re
 
-            prompt          = str(arguments["prompt"])
-            messages        = arguments.get("messages", [])
-            model           = arguments.get("model", _DEFAULT_MODEL)
+            prompt = str(arguments["prompt"])
+            messages = arguments.get("messages", [])
+            model = arguments.get("model", _DEFAULT_MODEL)
             task_complexity = arguments.get("task_complexity", "auto")
+            algorithm = str(arguments.get("algorithm", "quantum")).lower()
+            focus = _resolve_focus(arguments, prompt=prompt, messages=messages)
 
-            _CSM_FILLER = [
-                r"\bplease note that\b", r"\bit is worth noting that\b",
-                r"\bit should be noted that\b", r"\bin order to\b",
-                r"\bbasically\b", r"\bactually\b", r"\bvery\b",
-                r"\bjust\b", r"\bsimply\b", r"\bquite\b",
-                r"\bof course\b", r"\bneedless to say\b",
-            ]
-            _CSM_CONTRACTIONS = {
-                r"\bdo not\b": "don't",   r"\bdoes not\b": "doesn't",
-                r"\bdid not\b": "didn't", r"\bcannot\b": "can't",
-                r"\bwill not\b": "won't",  r"\bwould not\b": "wouldn't",
-                r"\bshould not\b": "shouldn't", r"\bcould not\b": "couldn't",
-                r"\bit is\b": "it's",     r"\bthat is\b": "that's",
-            }
+            if algorithm == "classic":
+                _CSM_FILLER = [
+                    r"\bplease note that\b", r"\bit is worth noting that\b",
+                    r"\bit should be noted that\b", r"\bin order to\b",
+                    r"\bbasically\b", r"\bactually\b", r"\bvery\b",
+                    r"\bjust\b", r"\bsimply\b", r"\bquite\b",
+                    r"\bof course\b", r"\bneedless to say\b",
+                ]
+                _CSM_CONTRACTIONS = {
+                    r"\bdo not\b": "don't", r"\bdoes not\b": "doesn't",
+                    r"\bdid not\b": "didn't", r"\bcannot\b": "can't",
+                    r"\bwill not\b": "won't", r"\bwould not\b": "wouldn't",
+                    r"\bshould not\b": "shouldn't", r"\bcould not\b": "couldn't",
+                    r"\bit is\b": "it's", r"\bthat is\b": "that's",
+                }
 
-            def _csm_compress(text: str) -> str:
-                t = _re.sub(r"[ \t]+", " ", text)
-                t = _re.sub(r"\n{3,}", "\n\n", t).strip()
-                for _p in _CSM_FILLER:
-                    t = _re.sub(_p, "", t, flags=_re.IGNORECASE)
-                t = _re.sub(r"[ \t]{2,}", " ", t).strip()
-                for _p, _r in _CSM_CONTRACTIONS.items():
-                    t = _re.sub(_p, _r, t, flags=_re.IGNORECASE)
-                return t
+                def _csm_compress(text: str) -> str:
+                    t = _re.sub(r"[ \t]+", " ", text)
+                    t = _re.sub(r"\n{3,}", "\n\n", t).strip()
+                    for _p in _CSM_FILLER:
+                        t = _re.sub(_p, "", t, flags=_re.IGNORECASE)
+                    t = _re.sub(r"[ \t]{2,}", " ", t).strip()
+                    for _p, _r in _CSM_CONTRACTIONS.items():
+                        t = _re.sub(_p, _r, t, flags=_re.IGNORECASE)
+                    return t
 
-            # Step 1: optimize prompt
-            opt_prompt = _csm_compress(prompt)
-
-            # Step 2: compress message history (returns optimized_messages)
-            opt_messages: list[dict[str, Any]] = []
-            if messages:
-                for m in messages:
-                    content = str(m.get("content", ""))
-                    opt_messages.append({"role": m.get("role", "user"), "content": _csm_compress(content)})
+                opt_prompt = _csm_compress(prompt)
+                opt_messages: list[dict[str, Any]] = []
+                if messages:
+                    for message in messages:
+                        content = normalize_content(message.get("content", ""))
+                        opt_messages.append({"role": message.get("role", "user"), "content": _csm_compress(content)})
+            else:
+                prompt_result = _quantum.optimize_text(
+                    prompt,
+                    focus=focus,
+                    preserve_code=True,
+                    strategies=["whitespace", "dedup_sentences", "strip_filler"],
+                    level="medium",
+                )
+                message_result = _quantum.compress_messages(messages, focus=focus, scorer=_scorer)
+                opt_prompt = prompt_result.text
+                opt_messages = message_result.messages
 
             # Step 3: count tokens
-            original_tokens    = _tbm.count_tokens(prompt)
-            optimized_tokens   = _tbm.count_tokens(opt_prompt)
+            original_tokens = _tbm.count_tokens(prompt)
+            optimized_tokens = _tbm.count_tokens(opt_prompt)
             raw_history_tokens = _tbm.count_messages(messages)    if messages     else 0
             opt_history_tokens = _tbm.count_messages(opt_messages) if opt_messages else 0
-            history_saved      = max(0, raw_history_tokens - opt_history_tokens)
+            history_saved = max(0, raw_history_tokens - opt_history_tokens)
             total_input_tokens = optimized_tokens + opt_history_tokens
 
             tokens_saved = max(0, original_tokens - optimized_tokens) + history_saved
-            savings_pct  = round(tokens_saved / max(original_tokens + raw_history_tokens, 1) * 100, 1)
+            savings_pct = round(tokens_saved / max(original_tokens + raw_history_tokens, 1) * 100, 1)
 
             # Step 4: schema overhead (lazy, cached)
             global _schema_overhead_cache
@@ -3952,29 +4142,31 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             )
 
             return _ok({
-                "optimized_prompt":      opt_prompt,
-                "optimized_messages":    opt_messages,
-                "original_tokens":       original_tokens,
-                "optimized_tokens":      optimized_tokens,
-                "raw_history_tokens":    raw_history_tokens,
-                "opt_history_tokens":    opt_history_tokens,
-                "history_saved":         history_saved,
-                "total_input_tokens":    total_input_tokens,
-                "tokens_saved":          tokens_saved,
-                "savings_pct":           savings_pct,
+                "optimized_prompt": opt_prompt,
+                "optimized_messages": opt_messages,
+                "original_tokens": original_tokens,
+                "optimized_tokens": optimized_tokens,
+                "raw_history_tokens": raw_history_tokens,
+                "opt_history_tokens": opt_history_tokens,
+                "history_saved": history_saved,
+                "total_input_tokens": total_input_tokens,
+                "tokens_saved": tokens_saved,
+                "savings_pct": savings_pct,
                 "schema_overhead_tokens": schema_overhead,
-                "task_complexity":       task_complexity,
+                "task_complexity": task_complexity,
                 "proposed_output_tokens": est_output,
-                "max_output_tokens":     est_output,
-                "total_tokens":          total_input_tokens + est_output,
-                "estimated_cost_usd":    total_cost,
+                "max_output_tokens": est_output,
+                "total_tokens": total_input_tokens + est_output,
+                "estimated_cost_usd": total_cost,
                 "schema_overhead_cost_usd": schema_cost,
                 "session_total_cost_usd": session_total_cost,
-                "cost_saved_usd":        cost_saved,
-                "model":                 model,
-                "proposal_text":         proposal_text,
-                "action":                "SHOW_PROPOSAL_TO_USER",
-                "token_count_method":    _tbm.get_stats()["token_count_method"],
+                "cost_saved_usd": cost_saved,
+                "model": model,
+                "proposal_text": proposal_text,
+                "action": "SHOW_PROPOSAL_TO_USER",
+                "token_count_method": _tbm.get_stats()["token_count_method"],
+                "algorithm": algorithm,
+                "focus_terms": extract_focus_terms(focus),
             })
 
         # ── chimera_batch — multi-tool single call ────────────────────────
