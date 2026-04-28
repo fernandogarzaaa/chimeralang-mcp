@@ -47,6 +47,7 @@ from chimeralang_mcp.token_engine import (
     get_token_budget_manager,
 )
 from chimeralang_mcp.envelope import ResultEnvelope, merge_envelopes
+from chimeralang_mcp.materials import MaterialRegistry, get_material_registry
 from chimeralang_mcp.persistence import PersistentNamespaceStore
 
 # ── AGI: pure-Python implementations (no external core.* dependency) ────────
@@ -459,6 +460,7 @@ _scorer        = MessageImportanceScorer()
 _cost_tracker  = _CostTracker()
 server         = Server("chimeralang-mcp")
 _store         = PersistentNamespaceStore()
+_materials_registry: MaterialRegistry | None = None
 
 # Schema overhead token count — computed lazily on first chimera_csm call
 _schema_overhead_cache: int = 0
@@ -686,6 +688,14 @@ def _state_namespace(arguments: dict[str, Any]) -> str:
     return str(arguments.get("namespace", "default")).strip() or "default"
 
 
+def _get_materials() -> MaterialRegistry:
+    global _materials_registry
+    base_dir = str(getattr(_store, "_base_dir", "")) or None
+    if _materials_registry is None or (base_dir and str(_materials_registry.base_dir) != base_dir):
+        _materials_registry = get_material_registry(base_dir, refresh=True)
+    return _materials_registry
+
+
 def _get_kb(namespace: str = "default") -> _KnowledgeBase:
     if namespace not in _kb_cache:
         _kb_cache[namespace] = _KnowledgeBase(
@@ -805,6 +815,29 @@ _POLICIES: dict[str, dict[str, Any]] = {
         "require_sources": False,
         "description": "Balanced policy for code reasoning and review findings.",
     },
+    "mcp_security": {
+        "min_confidence": 0.8,
+        "detect_strategy": "semantic",
+        "detect_threshold": 0.8,
+        "require_sources": True,
+        "security_categories": ["token_theft", "scope_creep", "tool_poisoning", "oversharing"],
+        "description": "Hardened MCP security policy focused on secrets, scope boundaries, and poisoned tool context.",
+    },
+    "prompt_injection_hardened": {
+        "min_confidence": 0.75,
+        "detect_strategy": "semantic",
+        "detect_threshold": 0.75,
+        "require_sources": True,
+        "security_categories": ["prompt_injection", "indirect_prompt_injection", "tool_poisoning"],
+        "description": "Treat contextual instructions and tool metadata as potentially tainted evidence.",
+    },
+    "research_factcheck": {
+        "min_confidence": 0.85,
+        "detect_strategy": "confidence_threshold",
+        "detect_threshold": 0.85,
+        "require_sources": True,
+        "description": "Evidence-first research policy tuned for claim extraction, contradiction checks, and abstention.",
+    },
 }
 
 
@@ -816,23 +849,80 @@ def _record_audit(namespace: str, entry: dict[str, Any]) -> str:
     return _store.append("audit", namespace, entry, max_items=500)
 
 
-def _extract_claims(text: str, max_claims: int = 10) -> list[dict[str, Any]]:
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
-    claims: list[dict[str, Any]] = []
-    blockers = ("maybe", "might", "could", "perhaps", "possibly")
-    for idx, sentence in enumerate(sentences):
-        lowered = sentence.lower()
-        if len(sentence) < 12 or any(token in lowered for token in blockers):
+def _policy_details(policy_name: str, config: dict[str, Any]) -> dict[str, Any]:
+    pattern = _get_materials().policy_pattern(policy_name)
+    details = dict(config)
+    if pattern:
+        details["owasp_refs"] = pattern.get("owasp_refs", [])
+        details["risk_tags"] = pattern.get("risk_tags", [])
+        details["source_ids"] = pattern.get("source_ids", [])
+        details["materials"] = _get_materials().material_usage(
+            ["policy_patterns"],
+            source_ids=list(pattern.get("source_ids", [])),
+        )["materials_used"]
+    return details
+
+
+def _dedupe_flags(flags: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    for flag in flags:
+        key = (
+            str(flag.get("id") or flag.get("category") or flag.get("kind") or ""),
+            tuple(sorted(str(term) for term in flag.get("matched_terms", []))),
+        )
+        if key in seen:
             continue
-        claim_type = "temporal" if re.search(r"\b\d{4}\b|\btoday\b|\byesterday\b|\btomorrow\b", lowered) else "statement"
-        claims.append({
-            "claim_id": f"claim_{idx + 1}",
-            "text": sentence,
-            "type": claim_type,
-            "confidence": 0.65 if claim_type == "statement" else 0.6,
-        })
-        if len(claims) >= max_claims:
-            break
+        seen.add(key)
+        unique.append(flag)
+    return unique
+
+
+def _material_usage(pack_types: list[str], source_ids: list[str] | None = None) -> dict[str, Any]:
+    return _get_materials().material_usage(pack_types, source_ids=source_ids)
+
+
+def _extract_claims(text: str, max_claims: int = 10) -> list[dict[str, Any]]:
+    registry = _get_materials()
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", text) if s.strip()]
+    claims: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    claim_index = 0
+    for sentence in sentences:
+        for atomic in registry.atomic_claim_parts(sentence):
+            normalized = atomic.strip()
+            lowered = normalized.lower()
+            if len(normalized) < 12 or lowered in seen:
+                continue
+            seen.add(lowered)
+            profile = registry.classify_claim(normalized)
+            claim_index += 1
+            confidence = 0.72
+            if profile["claim_type"] in {"temporal", "numeric", "citation"}:
+                confidence -= 0.06
+            if profile["hedged"]:
+                confidence -= 0.18
+            if profile["abstained"]:
+                confidence -= 0.3
+            confidence = max(0.2, round(confidence, 4))
+            claims.append(
+                {
+                    "claim_id": f"claim_{claim_index}",
+                    "text": normalized,
+                    "type": profile["claim_type"],
+                    "claim_type": profile["claim_type"],
+                    "confidence": confidence,
+                    "risk_tags": profile["risk_tags"],
+                    "hedged": profile["hedged"],
+                    "abstained": profile["abstained"],
+                    "source_sentence": sentence,
+                    "atomic_parts": [normalized],
+                    "attack_flags": profile["attack_flags"],
+                    "pack_version": profile["pack_version"],
+                }
+            )
+            if len(claims) >= max_claims:
+                return claims
     return claims
 
 
@@ -847,71 +937,187 @@ def _evidence_text(item: Any) -> str:
     return json.dumps(item, ensure_ascii=True, sort_keys=True)
 
 
+def _tokenize_for_match(text: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", text.lower())
+        if len(token) > 2 and token not in {"the", "and", "that", "with", "from"}
+    }
+
+
+def _best_evidence_excerpt(claim_tokens: set[str], evidence_text: str) -> str:
+    sentences = [segment.strip() for segment in re.split(r"(?<=[.!?])\s+", evidence_text) if segment.strip()]
+    best = evidence_text[:240]
+    best_score = -1.0
+    for sentence in sentences:
+        score = len(claim_tokens.intersection(_tokenize_for_match(sentence))) / max(len(claim_tokens), 1)
+        if score > best_score:
+            best_score = score
+            best = sentence[:240]
+    return best
+
+
+def _contradiction_score(claim_text: str, evidence_text: str, overlap_score: float) -> float:
+    claim_lower = claim_text.lower()
+    evidence_lower = evidence_text.lower()
+    score = 0.0
+    claim_years = re.findall(r"\b\d{4}\b", claim_text)
+    evidence_years = re.findall(r"\b\d{4}\b", evidence_text)
+    claim_numbers = re.findall(r"\b\d+(?:\.\d+)?%?\b", claim_text)
+    evidence_numbers = re.findall(r"\b\d+(?:\.\d+)?%?\b", evidence_text)
+    claim_has_negation = bool(re.search(r"\b(?:not|no|never|cannot|can't|isn't|wasn't|aren't)\b", claim_lower))
+    evidence_has_negation = bool(re.search(r"\b(?:not|no|never|cannot|can't|isn't|wasn't|aren't)\b", evidence_lower))
+
+    if claim_years and overlap_score >= 0.35 and evidence_years and not all(year in evidence_years for year in claim_years):
+        score = max(score, 0.86)
+    if claim_numbers and overlap_score >= 0.35 and evidence_numbers and not all(num in evidence_numbers for num in claim_numbers):
+        score = max(score, 0.84)
+    if overlap_score >= 0.55 and claim_has_negation != evidence_has_negation:
+        score = max(score, 0.82)
+    negated_claim = re.sub(r"\bis\b", " is not ", claim_lower, count=1)
+    if negated_claim != claim_lower and negated_claim in evidence_lower:
+        score = max(score, 0.95)
+    return score
+
+
 def _verify_claims_against_evidence(
     claims: list[dict[str, Any]],
     evidence: list[Any],
 ) -> dict[str, Any]:
+    registry = _get_materials()
     evidence_texts = [_evidence_text(item) for item in evidence]
     evidence_blob = "\n".join(evidence_texts).lower()
     verified_claims: list[dict[str, Any]] = []
     unsupported_claims: list[dict[str, Any]] = []
     contradicted_claims: list[dict[str, Any]] = []
+    aggregate_matches: list[dict[str, Any]] = []
+    aggregate_attack_flags: list[dict[str, Any]] = []
+    all_source_ids: set[str] = set()
 
     for claim in claims:
         claim_text = str(claim.get("text", "")).strip()
         if not claim_text:
             continue
-        claim_tokens = {
-            token for token in re.findall(r"[a-z0-9]+", claim_text.lower())
-            if len(token) > 2
-        }
+        claim_tokens = _tokenize_for_match(claim_text)
+        gold_record = next(
+            (
+                record
+                for record in registry.pack("verification_gold")
+                if str(record.get("claim", "")).strip().lower() == claim_text.lower()
+            ),
+            None,
+        )
         support_score = 0.0
         contradiction_score = 0.0
-        best_source = ""
+        best_match: dict[str, Any] | None = None
+        contradiction_match: dict[str, Any] | None = None
+        claim_attack_flags: list[dict[str, Any]] = []
 
-        for evidence_text in evidence_texts:
+        for idx, evidence_text in enumerate(evidence_texts):
             normalized = evidence_text.lower()
-            overlap = claim_tokens.intersection(re.findall(r"[a-z0-9]+", normalized))
+            overlap = claim_tokens.intersection(_tokenize_for_match(normalized))
             score = len(overlap) / max(len(claim_tokens), 1)
             if claim_text.lower() in normalized:
                 score = max(score, 1.0)
+            if gold_record:
+                exemplar_scores = []
+                for exemplar in gold_record.get("evidence", []):
+                    exemplar_tokens = _tokenize_for_match(str(exemplar))
+                    exemplar_scores.append(
+                        len(exemplar_tokens.intersection(_tokenize_for_match(evidence_text))) / max(len(exemplar_tokens), 1)
+                    )
+                exemplar_score = max(exemplar_scores or [0.0])
+                if exemplar_score >= 0.45:
+                    gold_verdict = str(gold_record.get("verdict", ""))
+                    if gold_verdict == "supported":
+                        score = max(score, 0.92)
+                    elif gold_verdict == "contradicted":
+                        contradiction_score = max(contradiction_score, 0.9)
+                    elif gold_verdict == "insufficient_evidence":
+                        score = min(score, 0.35)
+            attack_flags = registry.find_attack_matches(evidence_text)
+            if attack_flags:
+                claim_attack_flags.extend(attack_flags)
+                aggregate_attack_flags.extend(attack_flags)
+                for flag in attack_flags:
+                    all_source_ids.update(flag.get("source_ids", []))
+            contradiction = _contradiction_score(claim_text, evidence_text, score)
+
             if score > support_score:
                 support_score = score
-                best_source = evidence_text[:240]
-
-            negated_claim = re.sub(r"\bis\b", " is not ", claim_text.lower(), count=1)
-            if negated_claim != claim_text.lower() and negated_claim in normalized:
-                contradiction_score = max(contradiction_score, 0.95)
-            if claim.get("type") == "temporal":
-                years = re.findall(r"\b\d{4}\b", claim_text)
-                if years and not any(year in evidence_text for year in years):
-                    contradiction_score = max(contradiction_score, 0.55)
+                best_match = {
+                    "evidence_index": idx,
+                    "support_score": round(score, 4),
+                    "excerpt": _best_evidence_excerpt(claim_tokens, evidence_text),
+                    "tainted": bool(attack_flags),
+                }
+            if contradiction > contradiction_score:
+                contradiction_score = contradiction
+                contradiction_match = {
+                    "evidence_index": idx,
+                    "contradiction_score": round(contradiction, 4),
+                    "excerpt": _best_evidence_excerpt(claim_tokens, evidence_text),
+                }
 
         evaluated = {
             **claim,
             "support_score": round(support_score, 4),
-            "best_evidence_excerpt": best_source,
+            "best_evidence_excerpt": (best_match or {}).get("excerpt", ""),
+            "evidence_matches": [match for match in [best_match, contradiction_match] if match],
+            "attack_flags": _dedupe_flags(claim_attack_flags),
+            "pack_version": registry.pack_version,
         }
         if contradiction_score >= 0.8:
             evaluated["status"] = "contradicted"
+            evaluated["verdict"] = "contradicted"
             evaluated["contradiction_score"] = round(contradiction_score, 4)
             contradicted_claims.append(evaluated)
-        elif support_score >= 0.55:
+            if contradiction_match:
+                aggregate_matches.append(contradiction_match)
+        elif support_score >= 0.55 and not ((best_match or {}).get("tainted")):
             evaluated["status"] = "supported"
+            evaluated["verdict"] = "supported"
             verified_claims.append(evaluated)
+            if best_match:
+                aggregate_matches.append(best_match)
         else:
             evaluated["status"] = "unsupported"
+            evaluated["verdict"] = "insufficient_evidence"
+            if best_match and best_match.get("tainted"):
+                evaluated["tainted_evidence"] = True
             unsupported_claims.append(evaluated)
+            if best_match:
+                aggregate_matches.append(best_match)
+        all_source_ids.update(claim.get("source_ids", []))
 
     total = len(verified_claims) + len(unsupported_claims) + len(contradicted_claims)
     verification_score = round(len(verified_claims) / max(total, 1), 4)
+    overall_verdict = (
+        "contradicted"
+        if contradicted_claims
+        else "insufficient_evidence"
+        if unsupported_claims
+        else "supported"
+    )
+    material_meta = _material_usage(
+        ["verification_gold", "attack_patterns"],
+        source_ids=sorted(all_source_ids),
+    )
     return {
         "verified_claims": verified_claims,
         "unsupported_claims": unsupported_claims,
         "contradicted_claims": contradicted_claims,
         "verification_score": verification_score,
         "evidence_count": len(evidence),
-        "supported": len(unsupported_claims) == 0 and len(contradicted_claims) == 0,
+        "supported": overall_verdict == "supported",
+        "verdict": overall_verdict,
+        "evidence_matches": aggregate_matches,
+        "attack_flags": _dedupe_flags(aggregate_attack_flags),
+        "materials_used": material_meta["materials_used"],
+        "pack_versions": material_meta["pack_versions"],
+        "source_ids": material_meta["source_ids"],
+        "pack_version": registry.pack_version,
+        "security_category_counts": registry.security_category_counts(_dedupe_flags(aggregate_attack_flags)),
         "evidence_digest": evidence_blob[:800],
     }
 
@@ -1086,7 +1292,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_detect",
-            description="Hallucination detection. Strategies: range, dictionary, semantic, cross_reference, temporal, confidence_threshold. Returns flags with severity.",
+            description="Hallucination and MCP security detection. Strategies: range, dictionary, semantic, cross_reference, temporal, confidence_threshold. Returns hallucination flags plus prompt-injection/tool-poisoning signals.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1174,7 +1380,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_audit",
-            description="Session constraint audit: total calls, pass/fail counts, avg confidence, warnings, tools used.",
+            description="Session constraint audit: total calls, pass/fail counts, avg confidence, warnings, tools used, and material/security metadata.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1188,7 +1394,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_claims",
-            description="Extract atomic claims from text or an envelope and return them with provenance metadata.",
+            description="Extract atomic claims from text or an envelope with claim typing, hedge/abstention tagging, and provenance metadata.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1201,7 +1407,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_verify",
-            description="Verify claims against evidence blobs or references. Returns supported, unsupported, and contradicted claims.",
+            description="Verify claims against evidence blobs or references. Returns FEVER-style supported, contradicted, or insufficient-evidence verdicts with evidence matches and attack flags.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1230,7 +1436,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_policy",
-            description="List, inspect, or apply reusable constraint policies such as strict_factual, brainstorm, medical_cautious, and code_review.",
+            description="List, inspect, or apply reusable constraint policies such as strict_factual, brainstorm, medical_cautious, code_review, mcp_security, prompt_injection_hardened, and research_factcheck.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1245,7 +1451,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_trace",
-            description="Inspect persisted result envelopes. Actions: latest, get, list, stats.",
+            description="Inspect persisted result envelopes. Actions: latest, get, list, stats. Includes material pack and security metadata.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1253,6 +1459,20 @@ async def list_tools() -> list[Tool]:
                     "envelope_id": {"type": "string", "description": "Envelope id to fetch when action=get."},
                     "limit": {"type": "integer", "default": 10, "description": "Number of trace items to return for latest/list."},
                     "namespace": {"type": "string", "default": "default"},
+                },
+            },
+        ),
+        Tool(
+            name="chimera_materials",
+            description="Inspect bundled material packs and manifests. Actions: list_packs, status, licenses, source_manifest. Read-only and offline.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list_packs", "status", "licenses", "source_manifest"],
+                        "default": "status",
+                    },
                 },
             },
         ),
@@ -1658,11 +1878,12 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_safety_check",
-            description="Pattern-based content safety check. Returns is_safe, reason, blocked/allowed counts.",
+            description="Pattern-based content safety check plus MCP security attack-pattern detection. Returns safety verdict, reason, attack flags, and category counts.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "content": {"type": "string", "description": "Content to validate"},
+                    "namespace": {"type": "string", "default": "default"},
                 },
                 "required": ["content"],
             },
@@ -2037,6 +2258,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             params     = arguments.get("params") or {}
             flags: list[dict[str, Any]] = []
             passed = True
+            value_text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=True, sort_keys=True)
+            registry = _get_materials()
 
             if strategy == "range":
                 vr = params.get("valid_range")
@@ -2071,7 +2294,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
             elif strategy == "semantic":
                 forbidden = params.get("forbidden_patterns", [])
-                val_str   = str(value).lower()
+                val_str   = str(value_text).lower()
                 if forbidden:
                     for pat in forbidden:
                         if pat.lower() in val_str:
@@ -2152,14 +2375,36 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                         "description": f"Confidence {confidence:.3f} < threshold {threshold}",
                     })
 
+            security_flags = registry.find_attack_matches(value_text)
+            if security_flags:
+                for flag in security_flags:
+                    flags.append(
+                        {
+                            "kind": f"SECURITY_{str(flag['category']).upper()}",
+                            "severity": flag["severity"],
+                            "description": flag["description"],
+                            "matched_terms": flag["matched_terms"],
+                            "owasp_refs": flag["owasp_refs"],
+                            "category": flag["category"],
+                        }
+                    )
+                if any(flag["severity"] >= 0.84 for flag in security_flags):
+                    passed = False
+
+            material_meta = _material_usage(["attack_patterns"], [sid for flag in security_flags for sid in flag.get("source_ids", [])])
+
             payload = {
                 "passed":     passed,
                 "strategy":   strategy,
-                "value":      str(value),
+                "value":      value,
+                "value_text": value_text[:500],
                 "confidence": confidence,
                 "clean":      len(flags) == 0,
                 "flag_count": len(flags),
                 "flags":      flags,
+                "attack_flags": security_flags,
+                "security_category_counts": registry.security_category_counts(security_flags),
+                **material_meta,
             }
             payload["envelope"] = _build_envelope(
                 payload,
@@ -2168,7 +2413,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 confidence_source=f"detect:{strategy}",
                 namespace=namespace,
                 tool_name=name,
-                metadata={"passed": passed, "strategy": strategy},
+                metadata={"passed": passed, "strategy": strategy, **material_meta, "security_category_counts": registry.security_category_counts(security_flags)},
                 warnings=[flag["description"] for flag in flags[:3]],
             )
             return _ok(payload)
@@ -2322,6 +2567,27 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             call_log = _middleware.call_log()
             persisted = _store.load("audit", namespace, [])
             traces = _store.load("traces", namespace, [])
+            security_category_counts: dict[str, int] = {}
+            material_index: dict[tuple[str, str], dict[str, Any]] = {}
+            pack_versions: dict[str, str] = {}
+            source_ids: set[str] = set()
+            for item in persisted:
+                for category, count in dict(item.get("security_category_counts", {})).items():
+                    security_category_counts[category] = security_category_counts.get(category, 0) + int(count)
+                for used in list(item.get("materials_used", [])):
+                    key = (str(used.get("pack_type", "")), str(used.get("pack_version", "")))
+                    material_index[key] = used
+                pack_versions.update(dict(item.get("pack_versions", {})))
+                source_ids.update(item.get("source_ids", []))
+            for trace in traces:
+                metadata = dict(trace.get("metadata", {}))
+                for category, count in dict(metadata.get("security_category_counts", {})).items():
+                    security_category_counts[category] = security_category_counts.get(category, 0) + int(count)
+                for used in list(metadata.get("materials_used", [])):
+                    key = (str(used.get("pack_type", "")), str(used.get("pack_version", "")))
+                    material_index[key] = used
+                pack_versions.update(dict(metadata.get("pack_versions", {})))
+                source_ids.update(metadata.get("source_ids", []))
             return _ok({
                 **summary,
                 "namespace": namespace,
@@ -2340,6 +2606,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     for r in call_log[-10:]
                 ],
                 "recent_persistent_events": persisted[-10:],
+                "security_category_counts": security_category_counts,
+                "materials_used": list(material_index.values()),
+                "pack_versions": pack_versions,
+                "source_ids": sorted(source_ids),
             })
 
         elif name == "chimera_claims":
@@ -2367,6 +2637,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 else json.dumps(source_value, ensure_ascii=True, sort_keys=True)
             )
             claims = _extract_claims(source_text, max_claims=max_claims)
+            claim_source_ids = {
+                "shmsw25/FActScore",
+                "lflage/OpenFActScore",
+            }
+            for claim in claims:
+                for attack_flag in claim.get("attack_flags", []):
+                    claim_source_ids.update(attack_flag.get("source_ids", []))
+            material_meta = _material_usage(["attack_patterns", "verification_gold"], sorted(claim_source_ids))
             envelope = ResultEnvelope.coerce(
                 incoming if incoming is not None else source_value,
                 kind="claim_set",
@@ -2377,13 +2655,22 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             envelope.confidence = 0.7 if claims else 0.3
             envelope.confidence_source = "claim_extraction"
             envelope.with_claims(claims)
-            envelope.metadata.update({"namespace": namespace, "tool_name": name, "max_claims": max_claims})
+            envelope.metadata.update(
+                {
+                    "namespace": namespace,
+                    "tool_name": name,
+                    "max_claims": max_claims,
+                    **material_meta,
+                }
+            )
             envelope.add_transform("chimera_claims", claim_count=len(claims))
             _record_trace(namespace, envelope)
             return _ok({
                 "claims": claims,
                 "claim_count": len(claims),
                 "namespace": namespace,
+                **material_meta,
+                "pack_version": _get_materials().pack_version,
                 "envelope": envelope.to_dict(),
             })
 
@@ -2433,9 +2720,23 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             envelope.confidence = verification["verification_score"]
             envelope.confidence_source = "evidence_check"
             envelope.with_claims(claims)
-            envelope.metadata.update({"namespace": namespace, "tool_name": name, "evidence_count": len(evidence)})
+            envelope.metadata.update(
+                {
+                    "namespace": namespace,
+                    "tool_name": name,
+                    "evidence_count": len(evidence),
+                    "materials_used": verification["materials_used"],
+                    "pack_versions": verification["pack_versions"],
+                    "source_ids": verification["source_ids"],
+                    "security_category_counts": verification["security_category_counts"],
+                }
+            )
             envelope.sources = [
-                {"index": idx, "preview": _evidence_text(item)[:180]}
+                {
+                    "index": idx,
+                    "preview": _evidence_text(item)[:180],
+                    "tainted": bool(_get_materials().find_attack_matches(_evidence_text(item))),
+                }
                 for idx, item in enumerate(evidence[:10])
             ]
             envelope.add_constraint(
@@ -2462,6 +2763,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "claims": len(claims),
                 "unsupported": len(verification["unsupported_claims"]),
                 "contradicted": len(verification["contradicted_claims"]),
+                "materials_used": verification["materials_used"],
+                "pack_versions": verification["pack_versions"],
+                "source_ids": verification["source_ids"],
+                "security_category_counts": verification["security_category_counts"],
             })
             return _ok({
                 "claims": claims,
@@ -2507,12 +2812,13 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 return _ok({
                     "policies": {
                         policy_name: {
-                            **{k: v for k, v in config.items() if k != "description"},
-                            "description": config.get("description", ""),
+                            **{k: v for k, v in _policy_details(policy_name, config).items() if k != "description"},
+                            "description": _policy_details(policy_name, config).get("description", ""),
                         }
                         for policy_name, config in _POLICIES.items()
                     },
                     "count": len(_POLICIES),
+                    "pack_version": _get_materials().pack_version,
                 })
 
             policy_name = arguments.get("policy", "")
@@ -2520,7 +2826,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             if not config:
                 return _err(f"Unknown policy: {policy_name}")
             if action == "get":
-                return _ok({"policy": policy_name, "config": config})
+                return _ok({"policy": policy_name, "config": _policy_details(policy_name, config), "pack_version": _get_materials().pack_version})
             if action != "apply":
                 return _err("chimera_policy action must be list|get|apply")
             if arguments.get("envelope") is None and "value" not in arguments:
@@ -2533,6 +2839,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 confidence=0.8,
                 confidence_source="policy_input",
             )
+            pattern = _get_materials().policy_pattern(policy_name)
             spec = ToolCallSpec(
                 tool_name=str(arguments.get("tool_name", "chimera_policy")),
                 min_confidence=float(config.get("min_confidence", 0.0)),
@@ -2556,7 +2863,30 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             envelope.value = constraint_result.value
             envelope.confidence = round(constraint_result.confidence, 4)
             envelope.confidence_source = f"policy:{policy_name}"
-            envelope.metadata.update({"namespace": namespace, "tool_name": name, "policy": policy_name})
+            value_text = (
+                constraint_result.value
+                if isinstance(constraint_result.value, str)
+                else json.dumps(constraint_result.value, ensure_ascii=True, sort_keys=True)
+            )
+            security_flags = _get_materials().find_attack_matches(value_text)
+            security_categories = set(config.get("security_categories", []))
+            relevant_security_flags = [
+                flag for flag in security_flags if not security_categories or flag.get("category") in security_categories
+            ]
+            material_meta = _material_usage(
+                ["policy_patterns", "attack_patterns"],
+                list(pattern.get("source_ids", [])) if pattern else None,
+            )
+            envelope.metadata.update(
+                {
+                    "namespace": namespace,
+                    "tool_name": name,
+                    "policy": policy_name,
+                    "owasp_refs": list(pattern.get("owasp_refs", [])) if pattern else [],
+                    **material_meta,
+                    "security_category_counts": _get_materials().security_category_counts(relevant_security_flags),
+                }
+            )
             sources_present = bool(envelope.sources)
             if not sources_present and isinstance(incoming.value, dict):
                 sources_present = bool(incoming.value.get("sources"))
@@ -2567,6 +2897,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 passed = False
             if config.get("warning"):
                 warnings.append(str(config["warning"]))
+            if relevant_security_flags:
+                warnings.append(
+                    "Security-sensitive content matched policy categories: "
+                    + ", ".join(sorted({str(flag.get("category")) for flag in relevant_security_flags}))
+                )
+                passed = False
             for warning in warnings:
                 if warning not in envelope.warnings:
                     envelope.warnings.append(warning)
@@ -2584,15 +2920,22 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "passed": passed,
                 "confidence": envelope.confidence,
                 "warnings": warnings,
+                "materials_used": material_meta["materials_used"],
+                "pack_versions": material_meta["pack_versions"],
+                "source_ids": material_meta["source_ids"],
+                "security_category_counts": _get_materials().security_category_counts(relevant_security_flags),
             })
             return _ok({
                 "policy": policy_name,
-                "config": config,
+                "config": _policy_details(policy_name, config),
                 "passed": passed,
                 "violations": constraint_result.violations,
                 "warnings": warnings,
                 "value": constraint_result.value,
                 "namespace": namespace,
+                "owasp_refs": list(pattern.get("owasp_refs", [])) if pattern else [],
+                "security_flags": relevant_security_flags,
+                **material_meta,
                 "envelope": envelope.to_dict(),
             })
 
@@ -2601,6 +2944,19 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             action = arguments.get("action", "latest")
             limit = max(1, int(arguments.get("limit", 10)))
             traces = list(_store.load("traces", namespace, []))
+            material_index: dict[tuple[str, str], dict[str, Any]] = {}
+            pack_versions: dict[str, str] = {}
+            source_ids: set[str] = set()
+            security_category_counts: dict[str, int] = {}
+            for trace in traces:
+                metadata = dict(trace.get("metadata", {}))
+                for used in list(metadata.get("materials_used", [])):
+                    key = (str(used.get("pack_type", "")), str(used.get("pack_version", "")))
+                    material_index[key] = used
+                pack_versions.update(dict(metadata.get("pack_versions", {})))
+                source_ids.update(metadata.get("source_ids", []))
+                for category, count in dict(metadata.get("security_category_counts", {})).items():
+                    security_category_counts[category] = security_category_counts.get(category, 0) + int(count)
             if action == "stats":
                 kinds: dict[str, int] = {}
                 for trace in traces:
@@ -2611,6 +2967,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     "trace_count": len(traces),
                     "kinds": kinds,
                     "storage_path": _store.path_for("traces", namespace),
+                    "materials_used": list(material_index.values()),
+                    "pack_versions": pack_versions,
+                    "source_ids": sorted(source_ids),
+                    "security_category_counts": security_category_counts,
                 })
             if action == "get":
                 envelope_id = str(arguments.get("envelope_id", "")).strip()
@@ -2625,6 +2985,9 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     "namespace": namespace,
                     "traces": traces[-limit:],
                     "trace_count": len(traces),
+                    "materials_used": list(material_index.values()),
+                    "pack_versions": pack_versions,
+                    "source_ids": sorted(source_ids),
                 })
             latest = traces[-limit:] if traces else []
             return _ok({
@@ -2632,7 +2995,23 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "latest_trace": latest[-1] if latest else None,
                 "recent_traces": latest,
                 "trace_count": len(traces),
+                "materials_used": list(material_index.values()),
+                "pack_versions": pack_versions,
+                "source_ids": sorted(source_ids),
             })
+
+        elif name == "chimera_materials":
+            action = str(arguments.get("action", "status"))
+            registry = _get_materials()
+            if action == "list_packs":
+                return _ok({"packs": registry.list_packs(), "pack_version": registry.pack_version})
+            if action == "licenses":
+                return _ok(registry.licenses())
+            if action == "source_manifest":
+                return _ok(registry.source_manifest())
+            if action != "status":
+                return _err("chimera_materials action must be list_packs|status|licenses|source_manifest")
+            return _ok(registry.status())
 
         # ── chimera_fracture — full pipeline ──────────────────────────────
         elif name == "chimera_fracture":
@@ -3084,12 +3463,46 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
         # ── AGI: chimera_safety_check ────────────────────────────────────────
         elif name == "chimera_safety_check":
-            content  = arguments.get("content", "")
-            sl       = _get_safety()
+            namespace = _state_namespace(arguments)
+            content = arguments.get("content", "")
+            sl = _get_safety()
+            registry = _get_materials()
             is_safe, reason = sl.validate_content(content)
-            return _ok({"is_safe": is_safe, "reason": reason,
-                        "blocked_count": sl._blocked_count,
-                        "allowed_count": sl._allowed_count})
+            attack_flags = registry.find_attack_matches(content)
+            category_counts = registry.security_category_counts(attack_flags)
+            if any(flag["severity"] >= 0.84 for flag in attack_flags):
+                is_safe = False
+                if reason == "ok":
+                    reason = "mcp_security_risk_detected"
+            material_meta = _material_usage(
+                ["attack_patterns", "policy_patterns"],
+                [sid for flag in attack_flags for sid in flag.get("source_ids", [])],
+            )
+            _record_audit(
+                namespace,
+                {
+                    "tool_name": name,
+                    "passed": is_safe,
+                    "confidence": 1.0 if is_safe else 0.4,
+                    "materials_used": material_meta["materials_used"],
+                    "pack_versions": material_meta["pack_versions"],
+                    "source_ids": material_meta["source_ids"],
+                    "security_category_counts": category_counts,
+                },
+            )
+            return _ok(
+                {
+                    "is_safe": is_safe,
+                    "reason": reason,
+                    "blocked_count": sl._blocked_count,
+                    "allowed_count": sl._allowed_count,
+                    "attack_flags": attack_flags,
+                    "security_category_counts": category_counts,
+                    "namespace": namespace,
+                    "pack_version": registry.pack_version,
+                    **material_meta,
+                }
+            )
 
         # ── AGI: chimera_ethical_eval ────────────────────────────────────────
         elif name == "chimera_ethical_eval":
@@ -3331,7 +3744,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                                           "chimera_safety_check", "chimera_ethical_eval", "chimera_gate",
                                           "chimera_confident", "chimera_memory", "chimera_knowledge",
                                           "chimera_claims", "chimera_verify", "chimera_policy",
-                                          "chimera_provenance_merge", "chimera_trace"],
+                                          "chimera_provenance_merge", "chimera_trace", "chimera_materials"],
                     "avoid_tools": ["chimera_embodied", "chimera_social", "chimera_transfer_learn", "chimera_evolve"],
                     "description": "AGI reasoning focus. Best for complex analysis, planning, and multi-step reasoning.",
                 },
@@ -3475,7 +3888,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     " ".join([
                         "chimera_run chimera_confident chimera_explore chimera_gate chimera_detect "
                         "chimera_constrain chimera_typecheck chimera_prove chimera_audit "
-                        "chimera_claims chimera_verify chimera_provenance_merge chimera_policy chimera_trace "
+                        "chimera_claims chimera_verify chimera_provenance_merge chimera_policy chimera_trace chimera_materials "
                         "chimera_fracture chimera_optimize chimera_compress chimera_budget chimera_score "
                         "chimera_cost_estimate chimera_cost_track chimera_dashboard chimera_csm "
                         "chimera_budget_lock chimera_causal chimera_deliberate chimera_metacognize "

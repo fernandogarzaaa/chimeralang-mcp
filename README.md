@@ -2,7 +2,7 @@
 
 **Give Claude typed confidence, hallucination detection, and constraint enforcement as native MCP tools.**
 
-ChimeraLang is a programming language built for AI cognition. This MCP server exposes its runtime as **43 tools** Claude can call during any conversation. No Anthropic permission needed, works today with Claude Desktop and Claude Code.
+ChimeraLang is a programming language built for AI cognition. This MCP server exposes its runtime as **44 tools** Claude can call during any conversation. No Anthropic permission needed, works today with Claude Desktop and Claude Code.
 
 ---
 
@@ -47,7 +47,7 @@ Or with a pip-installed version:
 }
 ```
 
-Restart Claude Desktop. 43 ChimeraLang tools are now available.
+Restart Claude Desktop. 44 ChimeraLang tools are now available.
 
 ---
 
@@ -55,7 +55,7 @@ Restart Claude Desktop. 43 ChimeraLang tools are now available.
 
 The core language/runtime tools are executable and deterministic. Several higher-level reasoning, safety, and cognition helpers are lightweight local heuristics intended for planning, triage, and guardrails rather than authoritative verification.
 
-Most stateful tools accept an optional `namespace` and persist data to `~/.chimeralang_mcp` (or `CHIMERA_MCP_DATA_DIR`) so agents can carry memory, world state, traces, and cost history across sessions.
+Most stateful tools accept an optional `namespace` and persist data to `~/.chimeralang_mcp` (or `CHIMERA_MCP_DATA_DIR`) so agents can carry memory, world state, traces, and cost history across sessions. The package also ships an embedded material pack plus offline CLI commands for `sync`, `build`, `status`, and `licenses`.
 
 ### Core Language
 
@@ -73,8 +73,8 @@ Most stateful tools accept an optional `namespace` and persist data to `~/.chime
 | `chimera_explore` | Wrap a value as exploratory and explicitly allow uncertainty |
 | `chimera_gate` | Collapse multiple candidates via consensus |
 | `chimera_constrain` | Full constraint middleware on any tool result |
-| `chimera_detect` | Hallucination detection across range, dictionary, semantic, cross-reference, temporal, and confidence-threshold strategies |
-| `chimera_safety_check` | Validate content against a safety policy |
+| `chimera_detect` | Hallucination and MCP security detection across range, dictionary, semantic, cross-reference, temporal, and confidence-threshold strategies |
+| `chimera_safety_check` | Validate content against a safety policy and flag prompt-injection, tool-poisoning, token-theft, and oversharing patterns |
 | `chimera_ethical_eval` | Evaluate an action against ethical principles |
 
 ### Reasoning and Cognition
@@ -105,11 +105,12 @@ Most stateful tools accept an optional `namespace` and persist data to `~/.chime
 
 | Tool | What it does |
 |---|---|
-| `chimera_claims` | Extract atomic claims from text or an envelope |
-| `chimera_verify` | Verify claims against evidence and split supported, unsupported, and contradicted results |
+| `chimera_claims` | Extract atomic claims from text or an envelope with claim typing plus hedge and abstention tags |
+| `chimera_verify` | Verify claims against evidence with FEVER-style supported, contradicted, or insufficient-evidence verdicts |
 | `chimera_provenance_merge` | Merge multiple result envelopes into one aggregated provenance object |
-| `chimera_policy` | Apply reusable constraint profiles like `strict_factual` and `code_review` |
-| `chimera_trace` | Inspect persisted result envelopes and trace history |
+| `chimera_policy` | Apply reusable constraint profiles like `strict_factual`, `mcp_security`, and `research_factcheck` |
+| `chimera_trace` | Inspect persisted result envelopes and trace history, including material-pack metadata |
+| `chimera_materials` | Inspect bundled material packs, licenses, build status, and pinned source manifests |
 
 ### Token Budget, Cost, and Workflow
 
@@ -173,6 +174,9 @@ ChimeraLang provides a practical constraint layer between Claude and its tools. 
 
 **Trace and provenance inspection:**  
 *"Merge the envelopes from those two tool calls with `chimera_provenance_merge`, then inspect the latest trace with `chimera_trace`."*
+
+**Material-pack inspection and build flow:**  
+*"List the bundled packs with `chimera_materials`, then run `chimeralang-mcp build` locally if you want generated JSON runtime and eval pack artifacts on disk."*
 
 ---
 
@@ -268,6 +272,13 @@ end
 
 ## Changelog
 
+### 0.5.0
+- Add a material-pack subsystem with pinned source manifests, pack builders, a loader, and offline `sync` / `build` / `status` / `licenses` CLI commands
+- Add `chimera_materials` and wire pack metadata into claims, verification, policy, detect, safety, trace, and audit flows
+- Upgrade claim extraction with pack-driven claim typing plus hedge and abstention tagging
+- Upgrade verification to FEVER-style verdicts with evidence matches, taint-aware attack flags, and pack-version reporting
+- Add MCP security policies, OWASP MCP Top 10 mappings, CI material builds, and an HTTP transport path for conformance workflows
+
 ### 0.4.0
 - Add a unified result envelope model with confidence, provenance, transform history, claims, constraints, warnings, and metadata
 - Persist namespace-scoped knowledge, memory, world model, self model, meta-learning history, traces, and cost tracking to disk
@@ -305,3 +316,22 @@ end
 ## License
 
 MIT (c) [Fernando Garza](https://github.com/fernandogarzaaa)
+## Materials CLI
+
+The wheel includes a compact curated core material pack. Larger corpora stay external and are only touched through manual CLI commands:
+
+```bash
+chimeralang-mcp status
+chimeralang-mcp licenses
+chimeralang-mcp sync
+chimeralang-mcp build
+```
+
+- `status` reports bundled pack counts and whether generated artifacts already exist in `CHIMERA_MCP_DATA_DIR/materials`
+- `licenses` prints the machine-readable source and bundle-policy report
+- `sync` fetches current upstream metadata snapshots for the pinned GitHub and Hugging Face sources
+- `build` writes normalized JSON manifests plus runtime and eval pack files to disk
+
+The runtime MCP tools never fetch from the network. They only consume the bundled core pack and any already-generated local artifacts.
+
+---
