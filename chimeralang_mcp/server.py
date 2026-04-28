@@ -46,6 +46,8 @@ from chimeralang_mcp.token_engine import (
     MessageImportanceScorer,
     get_token_budget_manager,
 )
+from chimeralang_mcp.envelope import ResultEnvelope, merge_envelopes
+from chimeralang_mcp.persistence import PersistentNamespaceStore
 
 # ── AGI: pure-Python implementations (no external core.* dependency) ────────
 import hashlib as _hashlib
@@ -193,8 +195,17 @@ class _KBEntry:
 
 
 class _KnowledgeBase:
-    def __init__(self) -> None:
+    def __init__(self, entries: list[dict[str, Any]] | None = None) -> None:
         self._entries: dict[str, _KBEntry] = {}
+        for item in entries or []:
+            entry = _KBEntry(
+                entry_id=str(item.get("entry_id", "")),
+                content=str(item.get("content", "")),
+                category=str(item.get("category", "general")),
+                tags=list(item.get("tags", [])),
+            )
+            if entry.entry_id:
+                self._entries[entry.entry_id] = entry
 
     def add(self, content: str, category: str = "general", tags: list | None = None) -> _KBEntry:
         eid = _hashlib.sha256(f"{content}{time.time()}".encode()).hexdigest()[:12]
@@ -212,10 +223,16 @@ class _KnowledgeBase:
             or any(q in t.lower() for t in e.tags)
         ]
 
+    def snapshot(self) -> list[dict[str, Any]]:
+        return [
+            {"entry_id": e.entry_id, "content": e.content, "category": e.category, "tags": e.tags}
+            for e in self._entries.values()
+        ]
+
 
 class _WorldModel:
-    def __init__(self) -> None:
-        self._facts: dict = {}
+    def __init__(self, facts: dict[str, Any] | None = None) -> None:
+        self._facts: dict[str, Any] = dict(facts or {})
 
     def update(self, key: str, value: Any, confidence: float = 0.8) -> dict:
         self._facts[key] = {"value": value, "confidence": confidence, "updated_at": time.time()}
@@ -226,11 +243,18 @@ class _WorldModel:
             return self._facts.get(key, {"error": f"Key '{key}' not found"})
         return {"facts": self._facts, "fact_count": len(self._facts)}
 
+    def snapshot(self) -> dict[str, Any]:
+        return dict(self._facts)
+
 
 class _SelfModel:
-    def __init__(self) -> None:
-        self._capabilities: dict = {}
-        self._observations:  list = []
+    def __init__(
+        self,
+        capabilities: dict[str, Any] | None = None,
+        observations: list[Any] | None = None,
+    ) -> None:
+        self._capabilities: dict[str, Any] = dict(capabilities or {})
+        self._observations:  list[Any] = list(observations or [])
 
     def update(self, capability: str, level: str = "present", evidence: str = "") -> dict:
         self._capabilities[capability] = {"level": level, "evidence": evidence}
@@ -240,10 +264,16 @@ class _SelfModel:
         return {"capabilities": self._capabilities,
                 "observations": self._observations[-10:]}
 
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "capabilities": dict(self._capabilities),
+            "observations": list(self._observations),
+        }
+
 
 class _MemoryStore:
-    def __init__(self) -> None:
-        self._entries: list = []
+    def __init__(self, entries: list[dict[str, Any]] | None = None) -> None:
+        self._entries: list[dict[str, Any]] = list(entries or [])
 
     def store(self, content: str, tags: list | None = None,
               importance: float = 0.5) -> dict:
@@ -263,10 +293,13 @@ class _MemoryStore:
         return {"entries": sorted(entries, key=lambda e: e["importance"],
                                   reverse=True)[:limit]}
 
+    def snapshot(self) -> list[dict[str, Any]]:
+        return list(self._entries)
+
 
 class _MetaLearner:
-    def __init__(self) -> None:
-        self._adaptations: list = []
+    def __init__(self, adaptations: list[dict[str, Any]] | None = None) -> None:
+        self._adaptations: list[dict[str, Any]] = list(adaptations or [])
 
     def record_adaptation(self, context: str = "", action: str = "",
                           outcome: str = "", confidence: float = 0.5) -> dict:
@@ -278,6 +311,9 @@ class _MetaLearner:
     def get_stats(self) -> dict:
         return {"total_adaptations": len(self._adaptations),
                 "recent": self._adaptations[-5:]}
+
+    def snapshot(self) -> list[dict[str, Any]]:
+        return list(self._adaptations)
 
 
 def _quantum_vote(responses: list, timeout_s: float = 5.0) -> dict:
@@ -361,8 +397,10 @@ import uuid as _uuid
 class _CostTracker:
     """In-memory ring buffer of the last 100 cost events."""
 
-    def __init__(self, maxlen: int = 100) -> None:
+    def __init__(self, maxlen: int = 100, history: list[dict[str, Any]] | None = None) -> None:
         self._history: collections.deque[dict[str, Any]] = _collections.deque(maxlen=maxlen)
+        for entry in history or []:
+            self._history.append(dict(entry))
 
     def record(
         self,
@@ -409,6 +447,9 @@ class _CostTracker:
             "history":            history[-10:],  # last 10 for brevity
         }
 
+    def snapshot(self) -> list[dict[str, Any]]:
+        return list(self._history)
+
 
 # ── session-scoped singletons ─────────────────────────────────────────────
 _middleware    = ClaudeConstraintMiddleware(confidence_threshold=0.7)
@@ -417,6 +458,7 @@ _tbm           = get_token_budget_manager()
 _scorer        = MessageImportanceScorer()
 _cost_tracker  = _CostTracker()
 server         = Server("chimeralang-mcp")
+_store         = PersistentNamespaceStore()
 
 # Schema overhead token count — computed lazily on first chimera_csm call
 _schema_overhead_cache: int = 0
@@ -435,11 +477,12 @@ _causal_reasoning:    _CausalReasoning | None    = None
 _deliberation_engine: _DeliberationEngine | None = None
 _safety_layer:        _SafetyLayer | None        = None
 _ethical_reasoner:    _EthicalReasoning | None   = None
-_kb:                  _KnowledgeBase | None      = None
-_world_model_inst:    _WorldModel | None         = None
-_self_model_inst:     _SelfModel | None          = None
-_memory_store:        _MemoryStore | None        = None
-_meta_learner_inst:   _MetaLearner | None        = None
+_kb_cache:            dict[str, _KnowledgeBase]  = {}
+_world_model_cache:   dict[str, _WorldModel]     = {}
+_self_model_cache:    dict[str, _SelfModel]      = {}
+_memory_store_cache:  dict[str, _MemoryStore]    = {}
+_meta_learner_cache:  dict[str, _MetaLearner]    = {}
+_cost_tracker_cache:  dict[str, _CostTracker]    = {}
 
 # ── New stub implementations ──────────────────────────────────────────────
 
@@ -639,39 +682,82 @@ def _get_ethical() -> _EthicalReasoning:
     return _ethical_reasoner
 
 
-def _get_kb() -> _KnowledgeBase:
-    global _kb
-    if _kb is None:
-        _kb = _KnowledgeBase()
-    return _kb
+def _state_namespace(arguments: dict[str, Any]) -> str:
+    return str(arguments.get("namespace", "default")).strip() or "default"
 
 
-def _get_world_model() -> _WorldModel:
-    global _world_model_inst
-    if _world_model_inst is None:
-        _world_model_inst = _WorldModel()
-    return _world_model_inst
+def _get_kb(namespace: str = "default") -> _KnowledgeBase:
+    if namespace not in _kb_cache:
+        _kb_cache[namespace] = _KnowledgeBase(
+            entries=_store.load("knowledge", namespace, [])
+        )
+    return _kb_cache[namespace]
 
 
-def _get_self_model() -> _SelfModel:
-    global _self_model_inst
-    if _self_model_inst is None:
-        _self_model_inst = _SelfModel()
-    return _self_model_inst
+def _save_kb(namespace: str) -> str:
+    return _store.save("knowledge", namespace, _get_kb(namespace).snapshot())
 
 
-def _get_memory() -> _MemoryStore:
-    global _memory_store
-    if _memory_store is None:
-        _memory_store = _MemoryStore()
-    return _memory_store
+def _get_world_model(namespace: str = "default") -> _WorldModel:
+    if namespace not in _world_model_cache:
+        _world_model_cache[namespace] = _WorldModel(
+            facts=_store.load("world_model", namespace, {})
+        )
+    return _world_model_cache[namespace]
 
 
-def _get_meta_learner() -> _MetaLearner:
-    global _meta_learner_inst
-    if _meta_learner_inst is None:
-        _meta_learner_inst = _MetaLearner()
-    return _meta_learner_inst
+def _save_world_model(namespace: str) -> str:
+    return _store.save("world_model", namespace, _get_world_model(namespace).snapshot())
+
+
+def _get_self_model(namespace: str = "default") -> _SelfModel:
+    if namespace not in _self_model_cache:
+        snapshot = _store.load("self_model", namespace, {"capabilities": {}, "observations": []})
+        _self_model_cache[namespace] = _SelfModel(
+            capabilities=snapshot.get("capabilities", {}),
+            observations=snapshot.get("observations", []),
+        )
+    return _self_model_cache[namespace]
+
+
+def _save_self_model(namespace: str) -> str:
+    return _store.save("self_model", namespace, _get_self_model(namespace).snapshot())
+
+
+def _get_memory(namespace: str = "default") -> _MemoryStore:
+    if namespace not in _memory_store_cache:
+        _memory_store_cache[namespace] = _MemoryStore(
+            entries=_store.load("memory", namespace, [])
+        )
+    return _memory_store_cache[namespace]
+
+
+def _save_memory(namespace: str) -> str:
+    return _store.save("memory", namespace, _get_memory(namespace).snapshot())
+
+
+def _get_meta_learner(namespace: str = "default") -> _MetaLearner:
+    if namespace not in _meta_learner_cache:
+        _meta_learner_cache[namespace] = _MetaLearner(
+            adaptations=_store.load("meta_learner", namespace, [])
+        )
+    return _meta_learner_cache[namespace]
+
+
+def _save_meta_learner(namespace: str) -> str:
+    return _store.save("meta_learner", namespace, _get_meta_learner(namespace).snapshot())
+
+
+def _get_cost_tracker(namespace: str = "default") -> _CostTracker:
+    if namespace not in _cost_tracker_cache:
+        _cost_tracker_cache[namespace] = _CostTracker(
+            history=_store.load("cost_tracker", namespace, [])
+        )
+    return _cost_tracker_cache[namespace]
+
+
+def _save_cost_tracker(namespace: str) -> str:
+    return _store.save("cost_tracker", namespace, _get_cost_tracker(namespace).snapshot())
 
 
 # ── helpers ───────────────────────────────────────────────────────────────
@@ -687,6 +773,199 @@ def _err(msg: str) -> CallToolResult:
         content=[TextContent(type="text", text=json.dumps({"error": msg}))],
         isError=True,
     )
+
+
+_POLICIES: dict[str, dict[str, Any]] = {
+    "strict_factual": {
+        "min_confidence": 0.85,
+        "detect_strategy": "confidence_threshold",
+        "detect_threshold": 0.85,
+        "require_sources": True,
+        "description": "High-confidence factual output with source expectations.",
+    },
+    "brainstorm": {
+        "min_confidence": 0.0,
+        "detect_strategy": "semantic",
+        "detect_threshold": 0.2,
+        "allow_exploration": True,
+        "description": "Low-friction exploratory mode that tolerates uncertainty.",
+    },
+    "medical_cautious": {
+        "min_confidence": 0.9,
+        "detect_strategy": "confidence_threshold",
+        "detect_threshold": 0.9,
+        "require_sources": True,
+        "warning": "Requires strong confidence and explicit supporting evidence.",
+        "description": "Conservative policy for medical or high-stakes content.",
+    },
+    "code_review": {
+        "min_confidence": 0.7,
+        "detect_strategy": "semantic",
+        "detect_threshold": 0.6,
+        "require_sources": False,
+        "description": "Balanced policy for code reasoning and review findings.",
+    },
+}
+
+
+def _record_trace(namespace: str, envelope: ResultEnvelope) -> str:
+    return _store.append("traces", namespace, envelope.to_dict(), max_items=300)
+
+
+def _record_audit(namespace: str, entry: dict[str, Any]) -> str:
+    return _store.append("audit", namespace, entry, max_items=500)
+
+
+def _extract_claims(text: str, max_claims: int = 10) -> list[dict[str, Any]]:
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    claims: list[dict[str, Any]] = []
+    blockers = ("maybe", "might", "could", "perhaps", "possibly")
+    for idx, sentence in enumerate(sentences):
+        lowered = sentence.lower()
+        if len(sentence) < 12 or any(token in lowered for token in blockers):
+            continue
+        claim_type = "temporal" if re.search(r"\b\d{4}\b|\btoday\b|\byesterday\b|\btomorrow\b", lowered) else "statement"
+        claims.append({
+            "claim_id": f"claim_{idx + 1}",
+            "text": sentence,
+            "type": claim_type,
+            "confidence": 0.65 if claim_type == "statement" else 0.6,
+        })
+        if len(claims) >= max_claims:
+            break
+    return claims
+
+
+def _evidence_text(item: Any) -> str:
+    if isinstance(item, str):
+        return item
+    if isinstance(item, dict):
+        for key in ("content", "text", "value", "summary"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+    return json.dumps(item, ensure_ascii=True, sort_keys=True)
+
+
+def _verify_claims_against_evidence(
+    claims: list[dict[str, Any]],
+    evidence: list[Any],
+) -> dict[str, Any]:
+    evidence_texts = [_evidence_text(item) for item in evidence]
+    evidence_blob = "\n".join(evidence_texts).lower()
+    verified_claims: list[dict[str, Any]] = []
+    unsupported_claims: list[dict[str, Any]] = []
+    contradicted_claims: list[dict[str, Any]] = []
+
+    for claim in claims:
+        claim_text = str(claim.get("text", "")).strip()
+        if not claim_text:
+            continue
+        claim_tokens = {
+            token for token in re.findall(r"[a-z0-9]+", claim_text.lower())
+            if len(token) > 2
+        }
+        support_score = 0.0
+        contradiction_score = 0.0
+        best_source = ""
+
+        for evidence_text in evidence_texts:
+            normalized = evidence_text.lower()
+            overlap = claim_tokens.intersection(re.findall(r"[a-z0-9]+", normalized))
+            score = len(overlap) / max(len(claim_tokens), 1)
+            if claim_text.lower() in normalized:
+                score = max(score, 1.0)
+            if score > support_score:
+                support_score = score
+                best_source = evidence_text[:240]
+
+            negated_claim = re.sub(r"\bis\b", " is not ", claim_text.lower(), count=1)
+            if negated_claim != claim_text.lower() and negated_claim in normalized:
+                contradiction_score = max(contradiction_score, 0.95)
+            if claim.get("type") == "temporal":
+                years = re.findall(r"\b\d{4}\b", claim_text)
+                if years and not any(year in evidence_text for year in years):
+                    contradiction_score = max(contradiction_score, 0.55)
+
+        evaluated = {
+            **claim,
+            "support_score": round(support_score, 4),
+            "best_evidence_excerpt": best_source,
+        }
+        if contradiction_score >= 0.8:
+            evaluated["status"] = "contradicted"
+            evaluated["contradiction_score"] = round(contradiction_score, 4)
+            contradicted_claims.append(evaluated)
+        elif support_score >= 0.55:
+            evaluated["status"] = "supported"
+            verified_claims.append(evaluated)
+        else:
+            evaluated["status"] = "unsupported"
+            unsupported_claims.append(evaluated)
+
+    total = len(verified_claims) + len(unsupported_claims) + len(contradicted_claims)
+    verification_score = round(len(verified_claims) / max(total, 1), 4)
+    return {
+        "verified_claims": verified_claims,
+        "unsupported_claims": unsupported_claims,
+        "contradicted_claims": contradicted_claims,
+        "verification_score": verification_score,
+        "evidence_count": len(evidence),
+        "supported": len(unsupported_claims) == 0 and len(contradicted_claims) == 0,
+        "evidence_digest": evidence_blob[:800],
+    }
+
+
+def _build_envelope(
+    value: Any,
+    *,
+    kind: str,
+    confidence: float,
+    confidence_source: str,
+    namespace: str,
+    tool_name: str,
+    sources: list[dict[str, Any]] | None = None,
+    metadata: dict[str, Any] | None = None,
+    warnings: list[str] | None = None,
+) -> dict[str, Any]:
+    envelope = ResultEnvelope.coerce(
+        value,
+        kind=kind,
+        confidence=confidence,
+        confidence_source=confidence_source,
+        sources=sources,
+        metadata=metadata,
+    )
+    envelope.kind = kind or envelope.kind
+    envelope.confidence = round(confidence if confidence is not None else envelope.confidence, 4)
+    envelope.confidence_source = confidence_source or envelope.confidence_source
+    envelope.metadata.update({"namespace": namespace, "tool_name": tool_name, **(metadata or {})})
+    for warning in warnings or []:
+        if warning not in envelope.warnings:
+            envelope.warnings.append(warning)
+    envelope.add_provenance("tool_call", tool_name=tool_name, namespace=namespace)
+    _record_trace(namespace, envelope)
+    return envelope.to_dict()
+
+
+def _normalize_envelope_input(
+    payload: Any,
+    *,
+    namespace: str,
+    tool_name: str,
+    confidence: float = 0.0,
+    confidence_source: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> ResultEnvelope:
+    envelope = ResultEnvelope.coerce(
+        payload,
+        kind="tool_output",
+        confidence=confidence,
+        confidence_source=confidence_source,
+        metadata=metadata,
+    )
+    envelope.metadata.update({"namespace": namespace, "tool_name": tool_name, **(metadata or {})})
+    return envelope
 
 def _run(source: str) -> dict[str, Any]:
     tokens = Lexer(source).tokenize()
@@ -862,6 +1141,11 @@ async def list_tools() -> list[Tool]:
                         "type": "boolean", "default": False,
                         "description": "True = violations raise exceptions, not just warnings",
                     },
+                    "namespace": {
+                        "type": "string",
+                        "description": "Optional persistence namespace for audit and trace state.",
+                        "default": "default",
+                    },
                 },
                 "required": ["tool_name", "output"],
             },
@@ -893,7 +1177,83 @@ async def list_tools() -> list[Tool]:
             description="Session constraint audit: total calls, pass/fail counts, avg confidence, warnings, tools used.",
             inputSchema={
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "namespace": {
+                        "type": "string",
+                        "description": "Optional persistence namespace.",
+                        "default": "default",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="chimera_claims",
+            description="Extract atomic claims from text or an envelope and return them with provenance metadata.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Raw text to extract claims from."},
+                    "envelope": {"description": "Optional envelope whose value will be inspected for claims."},
+                    "max_claims": {"type": "integer", "default": 10, "description": "Maximum claims to extract."},
+                    "namespace": {"type": "string", "default": "default"},
+                },
+            },
+        ),
+        Tool(
+            name="chimera_verify",
+            description="Verify claims against evidence blobs or references. Returns supported, unsupported, and contradicted claims.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "claims": {"type": "array", "description": "Claims to verify. If omitted, extracted from text or envelope."},
+                    "text": {"type": "string", "description": "Optional raw text used to derive claims."},
+                    "envelope": {"description": "Optional envelope containing value or claims to verify."},
+                    "evidence": {"type": "array", "description": "Evidence snippets or objects with text/content fields."},
+                    "namespace": {"type": "string", "default": "default"},
+                },
+                "required": ["evidence"],
+            },
+        ),
+        Tool(
+            name="chimera_provenance_merge",
+            description="Merge multiple result envelopes into one combined envelope with aggregated confidence and trace history.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "envelopes": {"type": "array", "description": "Result envelopes to merge."},
+                    "strategy": {"type": "string", "enum": ["weighted", "mean", "max"], "default": "weighted"},
+                    "merge_value_mode": {"type": "string", "enum": ["list", "first", "consensus"], "default": "list"},
+                    "namespace": {"type": "string", "default": "default"},
+                },
+                "required": ["envelopes"],
+            },
+        ),
+        Tool(
+            name="chimera_policy",
+            description="List, inspect, or apply reusable constraint policies such as strict_factual, brainstorm, medical_cautious, and code_review.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "get", "apply"], "default": "list"},
+                    "policy": {"type": "string", "description": "Policy name to inspect or apply."},
+                    "value": {"description": "Value to constrain when action=apply."},
+                    "envelope": {"description": "Optional existing envelope to apply the policy to."},
+                    "tool_name": {"type": "string", "default": "chimera_policy"},
+                    "namespace": {"type": "string", "default": "default"},
+                },
+            },
+        ),
+        Tool(
+            name="chimera_trace",
+            description="Inspect persisted result envelopes. Actions: latest, get, list, stats.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["latest", "get", "list", "stats"], "default": "latest"},
+                    "envelope_id": {"type": "string", "description": "Envelope id to fetch when action=get."},
+                    "limit": {"type": "integer", "default": 10, "description": "Number of trace items to return for latest/list."},
+                    "namespace": {"type": "string", "default": "default"},
+                },
             },
         ),
         Tool(
@@ -1077,6 +1437,11 @@ async def list_tools() -> list[Tool]:
                         "description": "Optional label (e.g. task name) for this entry.",
                         "default": "",
                     },
+                    "namespace": {
+                        "type": "string",
+                        "description": "Optional persistence namespace.",
+                        "default": "default",
+                    },
                 },
                 "required": ["tokens_before", "tokens_after"],
             },
@@ -1086,7 +1451,13 @@ async def list_tools() -> list[Tool]:
             description="Session cost summary: tokens saved, dollars saved, avg compression %, last 10 events.",
             inputSchema={
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "namespace": {
+                        "type": "string",
+                        "description": "Optional persistence namespace.",
+                        "default": "default",
+                    },
+                },
             },
         ),
         Tool(
@@ -1232,6 +1603,7 @@ async def list_tools() -> list[Tool]:
                     "action_taken": {"type": "string", "default": ""},
                     "outcome":    {"type": "string", "default": ""},
                     "confidence": {"type": "number", "default": 0.5},
+                    "namespace": {"type": "string", "default": "default"},
                 },
             },
         ),
@@ -1280,6 +1652,7 @@ async def list_tools() -> list[Tool]:
                     "key":        {"type": "string"},
                     "value":      {},
                     "confidence": {"type": "number", "default": 0.8},
+                    "namespace": {"type": "string", "default": "default"},
                 },
             },
         ),
@@ -1383,6 +1756,7 @@ async def list_tools() -> list[Tool]:
                     "capability": {"type": "string"},
                     "level":      {"type": "string", "default": "present"},
                     "evidence":   {"type": "string", "default": ""},
+                    "namespace":  {"type": "string", "default": "default"},
                 },
             },
         ),
@@ -1397,6 +1771,7 @@ async def list_tools() -> list[Tool]:
                     "category": {"type": "string", "default": "general"},
                     "tags":     {"type": "array", "items": {"type": "string"}},
                     "query":    {"type": "string"},
+                    "namespace": {"type": "string", "default": "default"},
                 },
             },
         ),
@@ -1412,6 +1787,7 @@ async def list_tools() -> list[Tool]:
                     "importance": {"type": "number", "default": 0.5},
                     "query":      {"type": "string"},
                     "limit":      {"type": "integer", "default": 10},
+                    "namespace":  {"type": "string", "default": "default"},
                 },
             },
         ),
@@ -1495,16 +1871,28 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
         # ── chimera_run ───────────────────────────────────────────────────
         if name == "chimera_run":
-            return _ok(_run(arguments["source"]))
+            namespace = _state_namespace(arguments)
+            result = _run(arguments["source"])
+            result["envelope"] = _build_envelope(
+                result,
+                kind="chimera_execution",
+                confidence=1.0 if not result["errors"] else 0.4,
+                confidence_source="runtime_execution",
+                namespace=namespace,
+                tool_name=name,
+                metadata={"source_length": len(arguments["source"])},
+            )
+            return _ok(result)
 
         # ── chimera_confident ─────────────────────────────────────────────
         elif name == "chimera_confident":
             value      = arguments["value"]
             confidence = float(arguments["confidence"])
             label      = arguments.get("label", str(value)[:40])
+            namespace  = _state_namespace(arguments)
 
             if confidence < 0.95:
-                return _ok({
+                payload = {
                     "passed":     False,
                     "error":      f"ConfidenceViolation: {confidence:.3f} < required 0.95",
                     "suggestion": (
@@ -1513,22 +1901,44 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     ),
                     "value":      value,
                     "confidence": confidence,
-                })
-            return _ok({
+                }
+                payload["envelope"] = _build_envelope(
+                    value,
+                    kind="confident_value",
+                    confidence=confidence,
+                    confidence_source="user_asserted",
+                    namespace=namespace,
+                    tool_name=name,
+                    warnings=[payload["error"]],
+                    metadata={"label": label, "passed": False},
+                )
+                return _ok(payload)
+            payload = {
                 "passed":     True,
                 "type":       "ConfidentValue",
                 "value":      value,
                 "confidence": confidence,
                 "label":      label,
                 "trace":      [f"confident({label})", f"score={confidence:.4f}"],
-            })
+            }
+            payload["envelope"] = _build_envelope(
+                value,
+                kind="confident_value",
+                confidence=confidence,
+                confidence_source="user_asserted",
+                namespace=namespace,
+                tool_name=name,
+                metadata={"label": label, "passed": True},
+            )
+            return _ok(payload)
 
         # ── chimera_explore ───────────────────────────────────────────────
         elif name == "chimera_explore":
             value      = arguments["value"]
             confidence = min(max(float(arguments.get("confidence", 0.5)), 0.0), 1.0)
             label      = arguments.get("label", str(value)[:40])
-            return _ok({
+            namespace  = _state_namespace(arguments)
+            payload = {
                 "type":              "ExploreValue",
                 "value":             value,
                 "confidence":        confidence,
@@ -1539,7 +1949,17 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     "Gate this value before treating it as fact."
                 ),
                 "trace": [f"explore({label})", f"score={confidence:.4f}"],
-            })
+            }
+            payload["envelope"] = _build_envelope(
+                value,
+                kind="explore_value",
+                confidence=confidence,
+                confidence_source="exploratory",
+                namespace=namespace,
+                tool_name=name,
+                metadata={"label": label},
+            )
+            return _ok(payload)
 
         # ── chimera_gate ──────────────────────────────────────────────────
         elif name == "chimera_gate":
@@ -1610,6 +2030,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
         # ── chimera_detect ────────────────────────────────────────────────
         elif name == "chimera_detect":
+            namespace  = _state_namespace(arguments)
             value      = arguments["value"]
             confidence = float(arguments.get("confidence", 0.8))
             strategy   = arguments["strategy"]
@@ -1731,7 +2152,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                         "description": f"Confidence {confidence:.3f} < threshold {threshold}",
                     })
 
-            return _ok({
+            payload = {
                 "passed":     passed,
                 "strategy":   strategy,
                 "value":      str(value),
@@ -1739,10 +2160,29 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "clean":      len(flags) == 0,
                 "flag_count": len(flags),
                 "flags":      flags,
-            })
+            }
+            payload["envelope"] = _build_envelope(
+                payload,
+                kind="hallucination_detection",
+                confidence=confidence if passed else max(0.2, confidence - 0.25),
+                confidence_source=f"detect:{strategy}",
+                namespace=namespace,
+                tool_name=name,
+                metadata={"passed": passed, "strategy": strategy},
+                warnings=[flag["description"] for flag in flags[:3]],
+            )
+            return _ok(payload)
 
         # ── chimera_constrain ─────────────────────────────────────────────
         elif name == "chimera_constrain":
+            namespace = _state_namespace(arguments)
+            incoming_envelope = _normalize_envelope_input(
+                arguments.get("envelope", arguments["output"]),
+                namespace=namespace,
+                tool_name=arguments["tool_name"],
+                confidence=float(arguments.get("input_confidence", 1.0)),
+                confidence_source="constraint_input",
+            )
             spec = ToolCallSpec(
                 tool_name        = arguments["tool_name"],
                 min_confidence   = float(arguments.get("min_confidence", 0.0)),
@@ -1753,10 +2193,39 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             )
             r = _middleware.call(
                 spec,
-                raw_output        = arguments["output"],
-                input_confidence  = float(arguments.get("input_confidence", 1.0)),
+                raw_output        = incoming_envelope.value,
+                input_confidence  = float(arguments.get("input_confidence", incoming_envelope.confidence or 1.0)),
             )
-            return _ok({
+            envelope = ResultEnvelope.coerce(
+                incoming_envelope,
+                kind="constrained_result",
+                confidence=r.confidence,
+                confidence_source="constraint_middleware",
+            )
+            envelope.value = r.value
+            envelope.confidence = round(r.confidence, 4)
+            envelope.confidence_source = "constraint_middleware"
+            envelope.warnings.extend([w for w in r.warnings if w not in envelope.warnings])
+            envelope.add_constraint(
+                "chimera_constrain",
+                r.passed,
+                tool_name=r.tool_name,
+                violations=r.violations,
+                warnings=r.warnings,
+            )
+            envelope.add_transform("chimera_constrain", passed=r.passed, duration_ms=round(r.duration_ms, 3))
+            _record_trace(namespace, envelope)
+            audit_entry = {
+                "tool_name": r.tool_name,
+                "passed": r.passed,
+                "confidence": round(r.confidence, 4),
+                "violations": r.violations,
+                "warnings": r.warnings,
+                "namespace": namespace,
+                "trace_id": envelope.envelope_id,
+            }
+            _record_audit(namespace, audit_entry)
+            payload = {
                 "tool_name":  r.tool_name,
                 "passed":     r.passed,
                 "value":      r.value,
@@ -1773,7 +2242,9 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                         for f in (r.detection_report.flags if r.detection_report else [])
                     ],
                 },
-            })
+                "envelope": envelope.to_dict(),
+            }
+            return _ok(payload)
 
         # ── chimera_typecheck ─────────────────────────────────────────────
         elif name == "chimera_typecheck":
@@ -1791,6 +2262,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
         # ── chimera_prove ─────────────────────────────────────────────────
         elif name == "chimera_prove":
+            namespace = _state_namespace(arguments)
             source  = arguments["source"]
             tokens  = Lexer(source).tokenize()
             ast     = Parser(tokens).parse()
@@ -1806,7 +2278,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             report = IntegrityEngine().certify(result, detection, source)
             proof  = report.to_dict()
 
-            return _ok({
+            payload = {
                 "execution": {
                     "emitted": [
                         {"value": str(v.raw), "confidence": round(v.confidence.value, 4)}
@@ -1830,14 +2302,33 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                         "Every reasoning step SHA-256 hashed and chained — tamper-evident."
                     ),
                 },
-            })
+            }
+            payload["envelope"] = _build_envelope(
+                payload,
+                kind="integrity_proof",
+                confidence=1.0 if proof["verdict"] == "certified" else 0.55,
+                confidence_source="integrity_engine",
+                namespace=namespace,
+                tool_name=name,
+                metadata={"verdict": proof["verdict"], "chain_length": proof["chain"]["length"]},
+                warnings=[flag["description"] for flag in proof["hallucination"]["flags"][:3]],
+            )
+            return _ok(payload)
 
         # ── chimera_audit ─────────────────────────────────────────────────
         elif name == "chimera_audit":
+            namespace = _state_namespace(arguments)
             summary  = _middleware.audit_summary()
             call_log = _middleware.call_log()
+            persisted = _store.load("audit", namespace, [])
+            traces = _store.load("traces", namespace, [])
             return _ok({
                 **summary,
+                "namespace": namespace,
+                "persistent_events": len(persisted),
+                "persistent_traces": len(traces),
+                "audit_storage_path": _store.path_for("audit", namespace),
+                "trace_storage_path": _store.path_for("traces", namespace),
                 "recent_calls": [
                     {
                         "tool":       r.tool_name,
@@ -1848,6 +2339,299 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     }
                     for r in call_log[-10:]
                 ],
+                "recent_persistent_events": persisted[-10:],
+            })
+
+        elif name == "chimera_claims":
+            namespace = _state_namespace(arguments)
+            max_claims = int(arguments.get("max_claims", 10))
+            incoming = None
+            if arguments.get("envelope") is not None:
+                incoming = _normalize_envelope_input(
+                    arguments["envelope"],
+                    namespace=namespace,
+                    tool_name=name,
+                    confidence=0.65,
+                    confidence_source="claim_input",
+                )
+                source_value = incoming.value
+            else:
+                source_value = arguments.get("text", "")
+
+            if source_value in ("", None):
+                return _err("chimera_claims requires 'text' or 'envelope'")
+
+            source_text = (
+                source_value
+                if isinstance(source_value, str)
+                else json.dumps(source_value, ensure_ascii=True, sort_keys=True)
+            )
+            claims = _extract_claims(source_text, max_claims=max_claims)
+            envelope = ResultEnvelope.coerce(
+                incoming if incoming is not None else source_value,
+                kind="claim_set",
+                confidence=0.7 if claims else 0.3,
+                confidence_source="claim_extraction",
+            )
+            envelope.kind = "claim_set"
+            envelope.confidence = 0.7 if claims else 0.3
+            envelope.confidence_source = "claim_extraction"
+            envelope.with_claims(claims)
+            envelope.metadata.update({"namespace": namespace, "tool_name": name, "max_claims": max_claims})
+            envelope.add_transform("chimera_claims", claim_count=len(claims))
+            _record_trace(namespace, envelope)
+            return _ok({
+                "claims": claims,
+                "claim_count": len(claims),
+                "namespace": namespace,
+                "envelope": envelope.to_dict(),
+            })
+
+        elif name == "chimera_verify":
+            namespace = _state_namespace(arguments)
+            incoming = None
+            if arguments.get("envelope") is not None:
+                incoming = _normalize_envelope_input(
+                    arguments["envelope"],
+                    namespace=namespace,
+                    tool_name=name,
+                    confidence=0.7,
+                    confidence_source="verification_input",
+                )
+
+            claims = list(arguments.get("claims") or [])
+            if not claims and incoming is not None and incoming.claims:
+                claims = incoming.claims
+            if not claims:
+                source_text = arguments.get("text")
+                if source_text is None and incoming is not None:
+                    source_text = (
+                        incoming.value
+                        if isinstance(incoming.value, str)
+                        else json.dumps(incoming.value, ensure_ascii=True, sort_keys=True)
+                    )
+                if source_text:
+                    claims = _extract_claims(str(source_text), max_claims=10)
+            if not claims:
+                return _err("chimera_verify requires claims, text, or an envelope with claims")
+
+            evidence = list(arguments.get("evidence") or [])
+            verification = _verify_claims_against_evidence(claims, evidence)
+            envelope = ResultEnvelope.coerce(
+                incoming if incoming is not None else {"claims": claims},
+                kind="verification_result",
+                confidence=verification["verification_score"],
+                confidence_source="evidence_check",
+            )
+            envelope.kind = "verification_result"
+            envelope.value = {
+                "claims": claims,
+                "verified_count": len(verification["verified_claims"]),
+                "unsupported_count": len(verification["unsupported_claims"]),
+                "contradicted_count": len(verification["contradicted_claims"]),
+            }
+            envelope.confidence = verification["verification_score"]
+            envelope.confidence_source = "evidence_check"
+            envelope.with_claims(claims)
+            envelope.metadata.update({"namespace": namespace, "tool_name": name, "evidence_count": len(evidence)})
+            envelope.sources = [
+                {"index": idx, "preview": _evidence_text(item)[:180]}
+                for idx, item in enumerate(evidence[:10])
+            ]
+            envelope.add_constraint(
+                "evidence_verification",
+                verification["supported"],
+                verified_count=len(verification["verified_claims"]),
+                unsupported_count=len(verification["unsupported_claims"]),
+                contradicted_count=len(verification["contradicted_claims"]),
+            )
+            envelope.add_transform("chimera_verify", verification_score=verification["verification_score"])
+            for claim in verification["unsupported_claims"][:3]:
+                warning = f"Unsupported claim: {claim['text']}"
+                if warning not in envelope.warnings:
+                    envelope.warnings.append(warning)
+            for claim in verification["contradicted_claims"][:3]:
+                warning = f"Contradicted claim: {claim['text']}"
+                if warning not in envelope.warnings:
+                    envelope.warnings.append(warning)
+            _record_trace(namespace, envelope)
+            _record_audit(namespace, {
+                "tool_name": name,
+                "passed": verification["supported"],
+                "confidence": verification["verification_score"],
+                "claims": len(claims),
+                "unsupported": len(verification["unsupported_claims"]),
+                "contradicted": len(verification["contradicted_claims"]),
+            })
+            return _ok({
+                "claims": claims,
+                **verification,
+                "namespace": namespace,
+                "envelope": envelope.to_dict(),
+            })
+
+        elif name == "chimera_provenance_merge":
+            namespace = _state_namespace(arguments)
+            raw_envelopes = list(arguments.get("envelopes") or [])
+            if not raw_envelopes:
+                return _err("chimera_provenance_merge requires 'envelopes'")
+            envelopes = [
+                _normalize_envelope_input(
+                    raw,
+                    namespace=namespace,
+                    tool_name=name,
+                    confidence=0.5,
+                    confidence_source="merge_input",
+                )
+                for raw in raw_envelopes
+            ]
+            merged = merge_envelopes(
+                envelopes,
+                strategy=arguments.get("strategy", "weighted"),
+                merge_value_mode=arguments.get("merge_value_mode", "list"),
+            )
+            merged.kind = "merged_provenance"
+            merged.metadata.update({"namespace": namespace, "tool_name": name})
+            _record_trace(namespace, merged)
+            return _ok({
+                "merged_from": len(envelopes),
+                "confidence": merged.confidence,
+                "namespace": namespace,
+                "envelope": merged.to_dict(),
+            })
+
+        elif name == "chimera_policy":
+            namespace = _state_namespace(arguments)
+            action = arguments.get("action", "list")
+            if action == "list":
+                return _ok({
+                    "policies": {
+                        policy_name: {
+                            **{k: v for k, v in config.items() if k != "description"},
+                            "description": config.get("description", ""),
+                        }
+                        for policy_name, config in _POLICIES.items()
+                    },
+                    "count": len(_POLICIES),
+                })
+
+            policy_name = arguments.get("policy", "")
+            config = _POLICIES.get(policy_name)
+            if not config:
+                return _err(f"Unknown policy: {policy_name}")
+            if action == "get":
+                return _ok({"policy": policy_name, "config": config})
+            if action != "apply":
+                return _err("chimera_policy action must be list|get|apply")
+            if arguments.get("envelope") is None and "value" not in arguments:
+                return _err("chimera_policy apply requires 'value' or 'envelope'")
+
+            incoming = _normalize_envelope_input(
+                arguments.get("envelope", arguments.get("value")),
+                namespace=namespace,
+                tool_name=str(arguments.get("tool_name", "chimera_policy")),
+                confidence=0.8,
+                confidence_source="policy_input",
+            )
+            spec = ToolCallSpec(
+                tool_name=str(arguments.get("tool_name", "chimera_policy")),
+                min_confidence=float(config.get("min_confidence", 0.0)),
+                output_forbidden=list(config.get("output_forbidden", [])),
+                detect_strategy=str(config.get("detect_strategy", "confidence_threshold")),
+                detect_threshold=float(config.get("detect_threshold", 0.5)),
+                strict=bool(config.get("strict", False)),
+            )
+            constraint_result = _middleware.call(
+                spec,
+                raw_output=incoming.value,
+                input_confidence=max(incoming.confidence, float(config.get("min_confidence", 0.0))),
+            )
+            envelope = ResultEnvelope.coerce(
+                incoming,
+                kind="policy_result",
+                confidence=constraint_result.confidence,
+                confidence_source=f"policy:{policy_name}",
+            )
+            envelope.kind = "policy_result"
+            envelope.value = constraint_result.value
+            envelope.confidence = round(constraint_result.confidence, 4)
+            envelope.confidence_source = f"policy:{policy_name}"
+            envelope.metadata.update({"namespace": namespace, "tool_name": name, "policy": policy_name})
+            sources_present = bool(envelope.sources)
+            if not sources_present and isinstance(incoming.value, dict):
+                sources_present = bool(incoming.value.get("sources"))
+            passed = constraint_result.passed
+            warnings = list(constraint_result.warnings)
+            if config.get("require_sources") and not sources_present:
+                warnings.append("Policy expects explicit sources but none were provided.")
+                passed = False
+            if config.get("warning"):
+                warnings.append(str(config["warning"]))
+            for warning in warnings:
+                if warning not in envelope.warnings:
+                    envelope.warnings.append(warning)
+            envelope.add_constraint(
+                f"policy:{policy_name}",
+                passed,
+                violations=constraint_result.violations,
+                warnings=warnings,
+            )
+            envelope.add_transform("chimera_policy", policy=policy_name, passed=passed)
+            _record_trace(namespace, envelope)
+            _record_audit(namespace, {
+                "tool_name": name,
+                "policy": policy_name,
+                "passed": passed,
+                "confidence": envelope.confidence,
+                "warnings": warnings,
+            })
+            return _ok({
+                "policy": policy_name,
+                "config": config,
+                "passed": passed,
+                "violations": constraint_result.violations,
+                "warnings": warnings,
+                "value": constraint_result.value,
+                "namespace": namespace,
+                "envelope": envelope.to_dict(),
+            })
+
+        elif name == "chimera_trace":
+            namespace = _state_namespace(arguments)
+            action = arguments.get("action", "latest")
+            limit = max(1, int(arguments.get("limit", 10)))
+            traces = list(_store.load("traces", namespace, []))
+            if action == "stats":
+                kinds: dict[str, int] = {}
+                for trace in traces:
+                    kind = str(trace.get("kind", "generic"))
+                    kinds[kind] = kinds.get(kind, 0) + 1
+                return _ok({
+                    "namespace": namespace,
+                    "trace_count": len(traces),
+                    "kinds": kinds,
+                    "storage_path": _store.path_for("traces", namespace),
+                })
+            if action == "get":
+                envelope_id = str(arguments.get("envelope_id", "")).strip()
+                if not envelope_id:
+                    return _err("chimera_trace get requires 'envelope_id'")
+                for trace in reversed(traces):
+                    if str(trace.get("envelope_id")) == envelope_id:
+                        return _ok({"namespace": namespace, "trace": trace})
+                return _err(f"Trace not found: {envelope_id}")
+            if action == "list":
+                return _ok({
+                    "namespace": namespace,
+                    "traces": traces[-limit:],
+                    "trace_count": len(traces),
+                })
+            latest = traces[-limit:] if traces else []
+            return _ok({
+                "namespace": namespace,
+                "latest_trace": latest[-1] if latest else None,
+                "recent_traces": latest,
+                "trace_count": len(traces),
             })
 
         # ── chimera_fracture — full pipeline ──────────────────────────────
@@ -2247,15 +3031,22 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         # ── AGI: chimera_meta_learn ─────────────────────────────────────────
         elif name == "chimera_meta_learn":
             action = arguments.get("action", "stats")
-            ml     = _get_meta_learner()
+            namespace = _state_namespace(arguments)
+            ml     = _get_meta_learner(namespace)
             if action == "record":
-                return _ok(ml.record_adaptation(
+                result = ml.record_adaptation(
                     context=arguments.get("context", ""),
                     action=arguments.get("action_taken", ""),
                     outcome=arguments.get("outcome", ""),
                     confidence=float(arguments.get("confidence", 0.5)),
-                ))
-            return _ok(ml.get_stats())
+                )
+                storage_path = _save_meta_learner(namespace)
+                return _ok({**result, "namespace": namespace, "storage_path": storage_path})
+            return _ok({
+                **ml.get_stats(),
+                "namespace": namespace,
+                "storage_path": _store.path_for("meta_learner", namespace),
+            })
 
         # ── AGI: chimera_quantum_vote ──────────────────────────────────────
         elif name == "chimera_quantum_vote":
@@ -2275,14 +3066,21 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         # ── AGI: chimera_world_model ─────────────────────────────────────────
         elif name == "chimera_world_model":
             action = arguments.get("action", "query")
-            wm     = _get_world_model()
+            namespace = _state_namespace(arguments)
+            wm     = _get_world_model(namespace)
             if action == "update":
-                return _ok(wm.update(
+                result = wm.update(
                     key=arguments.get("key", ""),
                     value=arguments.get("value"),
                     confidence=float(arguments.get("confidence", 0.8)),
-                ))
-            return _ok(wm.query(key=arguments.get("key")))
+                )
+                storage_path = _save_world_model(namespace)
+                return _ok({**result, "namespace": namespace, "storage_path": storage_path})
+            return _ok({
+                **wm.query(key=arguments.get("key")),
+                "namespace": namespace,
+                "storage_path": _store.path_for("world_model", namespace),
+            })
 
         # ── AGI: chimera_safety_check ────────────────────────────────────────
         elif name == "chimera_safety_check":
@@ -2373,41 +3171,67 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         # ── AGI: chimera_self_model ──────────────────────────────────────────
         elif name == "chimera_self_model":
             action = arguments.get("action", "reflect")
-            sm     = _get_self_model()
+            namespace = _state_namespace(arguments)
+            sm     = _get_self_model(namespace)
             if action == "update":
-                return _ok(sm.update(
+                result = sm.update(
                     capability=arguments.get("capability", ""),
                     level=arguments.get("level", "present"),
                     evidence=arguments.get("evidence", ""),
-                ))
-            return _ok(sm.reflect())
+                )
+                storage_path = _save_self_model(namespace)
+                return _ok({**result, "namespace": namespace, "storage_path": storage_path})
+            return _ok({
+                **sm.reflect(),
+                "namespace": namespace,
+                "storage_path": _store.path_for("self_model", namespace),
+            })
 
         # ── AGI: chimera_knowledge ──────────────────────────────────────────
         elif name == "chimera_knowledge":
             action = arguments.get("action", "search")
-            kb     = _get_kb()
+            namespace = _state_namespace(arguments)
+            kb     = _get_kb(namespace)
             if action == "add":
                 entry = kb.add(content=arguments.get("content", ""),
                                category=arguments.get("category", "general"),
                                tags=arguments.get("tags", []))
-                return _ok({"added": True, "entry_id": entry.entry_id})
+                storage_path = _save_kb(namespace)
+                return _ok({"added": True, "entry_id": entry.entry_id, "namespace": namespace, "storage_path": storage_path})
             elif action == "search":
-                return _ok({"results": kb.search(query=arguments.get("query", ""))})
+                return _ok({
+                    "results": kb.search(query=arguments.get("query", "")),
+                    "namespace": namespace,
+                    "storage_path": _store.path_for("knowledge", namespace),
+                })
             elif action == "list":
                 return _ok({"entries": len(kb._entries),
-                            "categories": list({e.category for e in kb._entries.values()})})
-            return _ok({"entry_count": len(kb._entries)})
+                            "categories": list({e.category for e in kb._entries.values()}),
+                            "namespace": namespace,
+                            "storage_path": _store.path_for("knowledge", namespace)})
+            return _ok({
+                "entry_count": len(kb._entries),
+                "namespace": namespace,
+                "storage_path": _store.path_for("knowledge", namespace),
+            })
 
         # ── AGI: chimera_memory ────────────────────────────────────────────
         elif name == "chimera_memory":
             action = arguments.get("action", "recall")
-            mem    = _get_memory()
+            namespace = _state_namespace(arguments)
+            mem    = _get_memory(namespace)
             if action == "store":
-                return _ok(mem.store(content=arguments.get("content", ""),
-                                     tags=arguments.get("tags", []),
-                                     importance=float(arguments.get("importance", 0.5))))
-            return _ok(mem.recall(query=arguments.get("query"),
-                                  limit=int(arguments.get("limit", 10))))
+                result = mem.store(content=arguments.get("content", ""),
+                                   tags=arguments.get("tags", []),
+                                   importance=float(arguments.get("importance", 0.5)))
+                storage_path = _save_memory(namespace)
+                return _ok({**result, "namespace": namespace, "storage_path": storage_path})
+            return _ok({
+                **mem.recall(query=arguments.get("query"),
+                             limit=int(arguments.get("limit", 10))),
+                "namespace": namespace,
+                "storage_path": _store.path_for("memory", namespace),
+            })
 
         # ── chimera_cost_estimate ──────────────────────────────────────────────
         elif name == "chimera_cost_estimate":
@@ -2441,22 +3265,31 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
         # ── chimera_cost_track ────────────────────────────────────────────────
         elif name == "chimera_cost_track":
-            entry = _cost_tracker.record(
+            namespace = _state_namespace(arguments)
+            tracker = _get_cost_tracker(namespace)
+            entry = tracker.record(
                 tokens_before = int(arguments["tokens_before"]),
                 tokens_after  = int(arguments["tokens_after"]),
                 model         = arguments.get("model", _DEFAULT_MODEL),
                 label         = arguments.get("label", ""),
             )
+            storage_path = _save_cost_tracker(namespace)
             log.info(
                 "[CostTracker] %s → %s tokens ($%.4f → $%.4f) saved %.1f%%",
                 entry["tokens_before"], entry["tokens_after"],
                 entry["cost_before"], entry["cost_after"], entry["pct_saved"],
             )
-            return _ok(entry)
+            return _ok({**entry, "namespace": namespace, "storage_path": storage_path})
 
         # ── chimera_dashboard ─────────────────────────────────────────────────
         elif name == "chimera_dashboard":
-            return _ok(_cost_tracker.summary())
+            namespace = _state_namespace(arguments)
+            tracker = _get_cost_tracker(namespace)
+            return _ok({
+                **tracker.summary(),
+                "namespace": namespace,
+                "storage_path": _store.path_for("cost_tracker", namespace),
+            })
 
         # ── chimera_mode — task-relevant tool guidance ─────────────────────
         elif name == "chimera_mode":
@@ -2478,10 +3311,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
             _MODES: dict[str, dict[str, Any]] = {
                 "minimal": {
-                    "recommended_tools": ["chimera_csm", "chimera_budget_lock", "chimera_gate", "chimera_confident", "chimera_memory"],
+                    "recommended_tools": ["chimera_csm", "chimera_budget_lock", "chimera_gate", "chimera_confident", "chimera_memory", "chimera_policy"],
                     "avoid_tools": ["chimera_causal", "chimera_deliberate", "chimera_metacognize", "chimera_quantum_vote",
                                     "chimera_embodied", "chimera_social", "chimera_transfer_learn", "chimera_evolve",
-                                    "chimera_prove", "chimera_audit", "chimera_self_model"],
+                                    "chimera_prove", "chimera_audit", "chimera_self_model", "chimera_trace"],
                     "description": "Core tools only. Best for simple Q&A and short tasks.",
                 },
                 "token": {
@@ -2496,7 +3329,9 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     "recommended_tools": ["chimera_csm", "chimera_causal", "chimera_deliberate", "chimera_metacognize",
                                           "chimera_quantum_vote", "chimera_plan_goals", "chimera_world_model",
                                           "chimera_safety_check", "chimera_ethical_eval", "chimera_gate",
-                                          "chimera_confident", "chimera_memory", "chimera_knowledge"],
+                                          "chimera_confident", "chimera_memory", "chimera_knowledge",
+                                          "chimera_claims", "chimera_verify", "chimera_policy",
+                                          "chimera_provenance_merge", "chimera_trace"],
                     "avoid_tools": ["chimera_embodied", "chimera_social", "chimera_transfer_learn", "chimera_evolve"],
                     "description": "AGI reasoning focus. Best for complex analysis, planning, and multi-step reasoning.",
                 },
@@ -2640,6 +3475,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     " ".join([
                         "chimera_run chimera_confident chimera_explore chimera_gate chimera_detect "
                         "chimera_constrain chimera_typecheck chimera_prove chimera_audit "
+                        "chimera_claims chimera_verify chimera_provenance_merge chimera_policy chimera_trace "
                         "chimera_fracture chimera_optimize chimera_compress chimera_budget chimera_score "
                         "chimera_cost_estimate chimera_cost_track chimera_dashboard chimera_csm "
                         "chimera_budget_lock chimera_causal chimera_deliberate chimera_metacognize "
