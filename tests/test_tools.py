@@ -5,8 +5,9 @@ import asyncio
 import json
 import unittest
 
+from chimeralang_mcp import __version__
 from chimeralang_mcp.server import (
-    _ok, _err, _tbm, _scorer, call_tool,
+    _ok, _err, _tbm, _scorer, call_tool, server,
     _MODEL_PRICING, _DEFAULT_MODEL, _CostTracker,
 )
 from chimeralang_mcp.token_engine import get_token_budget_manager
@@ -247,6 +248,18 @@ class TestChimeraFracturePipeline(unittest.TestCase):
         self.assertIn("publish", flattened.lower())
 
 
+class TestChimeraProve(unittest.TestCase):
+    """chimera_prove tests."""
+
+    def test_prove_returns_integrity_payload_for_minimal_program(self):
+        """User-facing chimera_prove should work on the same minimal program chimera_run accepts."""
+        payload = _tool_payload("chimera_prove", {"source": 'emit Confident("ok", 0.97)'})
+        self.assertIn("execution", payload)
+        self.assertIn("proof", payload)
+        self.assertIn("verdict", payload["proof"])
+        self.assertIn("root_hash", payload["proof"])
+
+
 class TestCostTracker(unittest.TestCase):
     """_CostTracker unit tests."""
 
@@ -332,6 +345,16 @@ class TestChimeraCSM(unittest.TestCase):
         })
         self.assertLessEqual(quantum["total_input_tokens"], classic["total_input_tokens"])
         self.assertEqual(quantum["algorithm"], "quantum")
+
+
+class TestServerMetadata(unittest.TestCase):
+    """Initialization metadata tests."""
+
+    def test_server_reports_package_version(self):
+        """MCP initialize metadata should report the package version, not the SDK version."""
+        options = server.create_initialization_options()
+        self.assertEqual(options.server_name, "chimeralang-mcp")
+        self.assertEqual(options.server_version, __version__)
 
 
 if __name__ == "__main__":

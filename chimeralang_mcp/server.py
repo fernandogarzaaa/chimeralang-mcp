@@ -41,6 +41,7 @@ from chimera.integrity import IntegrityEngine
 from chimera.types import ConfidenceViolation
 from chimera.claude_adapter import ClaudeConstraintMiddleware, ToolCallSpec
 
+from chimeralang_mcp import __version__
 from chimeralang_mcp.token_engine import (
     TokenBudgetManager,
     MessageImportanceScorer,
@@ -462,7 +463,7 @@ _tbm           = get_token_budget_manager()
 _scorer        = MessageImportanceScorer()
 _quantum       = get_quantum_compression_engine()
 _cost_tracker  = _CostTracker()
-server         = Server("chimeralang-mcp")
+server         = Server("chimeralang-mcp", version=__version__)
 _store         = PersistentNamespaceStore()
 _materials_registry: MaterialRegistry | None = None
 

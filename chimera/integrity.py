@@ -139,7 +139,16 @@ class IntegrityReport:
             },
             "hallucination": {
                 "clean": self.hallucination_clean,
-                "flags": len(self.hallucination_flags),
+                "flag_count": len(self.hallucination_flags),
+                "flags": [
+                    {
+                        "kind": flag.kind.name,
+                        "severity": flag.severity,
+                        "description": flag.description,
+                        "evidence": flag.evidence,
+                    }
+                    for flag in self.hallucination_flags
+                ],
             },
             "verdict": self.verdict,
             "duration_ms": self.duration_ms,
