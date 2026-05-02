@@ -113,25 +113,122 @@ class _CausalReasoning:
 
 
 class _DeliberationEngine:
-    @staticmethod
-    def _tok(text: str) -> set:
-        return set(re.sub(r"[^\w\s]", "", str(text).lower()).split())
+    _AFFIRM = {
+        "yes", "should", "adopt", "use", "keep", "proceed", "recommended",
+        "valuable", "beneficial", "worthwhile", "safe", "ready", "ship",
+    }
+    _NEGATE = {
+        "no", "not", "avoid", "reject", "defer", "block", "unsafe", "risky",
+        "harmful", "stop", "fail", "fails", "against",
+    }
+    _SYNONYMS = {
+        "adopt": "use",
+        "choose": "use",
+        "select": "use",
+        "proceed": "use",
+        "ship": "release",
+        "publish": "release",
+        "launch": "release",
+        "repair": "fix",
+        "resolve": "fix",
+        "runtime": "runtime",
+        "cir": "cir",
+        "hooks": "hook",
+        "hook": "hook",
+        "callback": "hook",
+        "middleware": "hook",
+        "safe": "safe",
+        "safer": "safe",
+        "risk": "risk",
+        "risky": "risk",
+    }
 
-    def deliberate(self, prompt: str, perspectives: list) -> dict:
+    @staticmethod
+    def _tok(text: str) -> set[str]:
+        return {
+            token
+            for token in re.sub(r"[^\w\s]", " ", str(text).lower()).split()
+            if len(token) > 2
+        }
+
+    def _semantic_terms(self, text: str) -> set[str]:
+        return {self._SYNONYMS.get(token, token) for token in self._tok(text)}
+
+    def _stance(self, text: str) -> str:
+        lowered = str(text).lower()
+        tokens = self._tok(lowered)
+        negated_recommendation = bool(re.search(r"\b(?:do not|don't|should not|must not|cannot|can't)\b", lowered))
+        affirm = len(tokens & self._AFFIRM)
+        negate = len(tokens & self._NEGATE) + (2 if negated_recommendation else 0)
+        if affirm > negate:
+            return "affirm"
+        if negate > affirm:
+            return "reject"
+        return "mixed"
+
+    def _semantic_similarity(self, left: dict[str, Any], right: dict[str, Any], prompt_terms: set[str]) -> float:
+        left_text = f"{left.get('perspective', '')} {left.get('content', '')}"
+        right_text = f"{right.get('perspective', '')} {right.get('content', '')}"
+        left_terms = self._semantic_terms(left_text)
+        right_terms = self._semantic_terms(right_text)
+        union = left_terms | right_terms
+        term_sim = len(left_terms & right_terms) / len(union) if union else 0.0
+        prompt_overlap = 0.0
+        if prompt_terms:
+            left_prompt = len(left_terms & prompt_terms) / len(prompt_terms)
+            right_prompt = len(right_terms & prompt_terms) / len(prompt_terms)
+            prompt_overlap = min(left_prompt, right_prompt)
+        stance_sim = 1.0 if self._stance(left_text) == self._stance(right_text) else 0.0
+        return min(1.0, stance_sim * 0.62 + prompt_overlap * 0.23 + term_sim * 0.15)
+
+    def deliberate(self, prompt: str, perspectives: list, mode: str = "semantic") -> dict:
         if not perspectives:
             return {"consensus": None, "perspectives": [], "divergence": 1.0}
-        tokens = [self._tok(p.get("content", "") + " " + p.get("perspective", ""))
-                  for p in perspectives]
+        if mode == "lexical_consensus":
+            tokens = [self._tok(p.get("content", "") + " " + p.get("perspective", ""))
+                      for p in perspectives]
+            sims = []
+            for i in range(len(tokens)):
+                for j in range(i + 1, len(tokens)):
+                    u = tokens[i] | tokens[j]
+                    sims.append(len(tokens[i] & tokens[j]) / len(u) if u else 0.0)
+            avg_sim = sum(sims) / len(sims) if sims else 0.0
+            scores = []
+            for i, toks in enumerate(tokens):
+                others = set().union(*(tokens[j] for j in range(len(tokens)) if j != i))
+                scores.append((len(toks & others) / len(toks) if toks else 0.0, perspectives[i]))
+            consensus = max(scores, key=lambda x: x[0])[1] if scores else None
+            return {
+                "prompt": prompt,
+                "perspectives": perspectives,
+                "consensus_perspective": consensus,
+                "avg_similarity": round(avg_sim, 4),
+                "divergence": round(1.0 - avg_sim, 4),
+                "perspective_count": len(perspectives),
+                "mode": "lexical_consensus",
+                "limitation": "Lexical Jaccard overlap only; use semantic mode for agreement about meaning.",
+            }
+
+        prompt_terms = self._semantic_terms(prompt)
         sims = []
-        for i in range(len(tokens)):
-            for j in range(i + 1, len(tokens)):
-                u = tokens[i] | tokens[j]
-                sims.append(len(tokens[i] & tokens[j]) / len(u) if u else 0.0)
+        for i in range(len(perspectives)):
+            for j in range(i + 1, len(perspectives)):
+                sims.append(self._semantic_similarity(perspectives[i], perspectives[j], prompt_terms))
         avg_sim = sum(sims) / len(sims) if sims else 0.0
+        stances = [
+            self._stance(f"{p.get('perspective', '')} {p.get('content', '')}")
+            for p in perspectives
+        ]
+        stance_counts = {stance: stances.count(stance) for stance in set(stances)}
+        consensus_stance = max(stance_counts, key=stance_counts.__getitem__)
         scores = []
-        for i, toks in enumerate(tokens):
-            others = set().union(*(tokens[j] for j in range(len(tokens)) if j != i))
-            scores.append((len(toks & others) / len(toks) if toks else 0.0, perspectives[i]))
+        for i, perspective in enumerate(perspectives):
+            other_sims = [
+                self._semantic_similarity(perspective, other, prompt_terms)
+                for j, other in enumerate(perspectives)
+                if i != j
+            ]
+            scores.append((sum(other_sims) / len(other_sims) if other_sims else 1.0, perspective))
         consensus = max(scores, key=lambda x: x[0])[1] if scores else None
         return {
             "prompt": prompt,
@@ -140,6 +237,11 @@ class _DeliberationEngine:
             "avg_similarity": round(avg_sim, 4),
             "divergence": round(1.0 - avg_sim, 4),
             "perspective_count": len(perspectives),
+            "mode": "semantic",
+            "consensus_detected": avg_sim >= 0.62 and stance_counts.get(consensus_stance, 0) / len(stances) >= 0.6,
+            "consensus_stance": consensus_stance,
+            "stance_counts": stance_counts,
+            "method_note": "Local semantic heuristic using stance, prompt-term alignment, and normalized concept overlap; not an embedding or NLI model.",
         }
 
 
@@ -348,32 +450,63 @@ def _quantum_vote(responses: list, timeout_s: float = 5.0) -> dict:
 
 def _plan_goals(goal: str) -> dict:
     g = goal.lower()
-    if any(w in g for w in ["build", "create", "implement", "develop", "write"]):
-        strategy  = "iterative_build"
-        sub_goals = ["Define requirements", "Design architecture",
-                     "Implement core", "Test and validate", "Deploy and monitor"]
-    elif any(w in g for w in ["analyze", "evaluate", "assess", "review"]):
-        strategy  = "analytical_decomposition"
-        sub_goals = ["Gather data", "Define evaluation criteria",
-                     "Run analysis", "Synthesize findings", "Report conclusions"]
-    elif any(w in g for w in ["fix", "debug", "resolve", "repair"]):
+
+    # keyword-based strategy detection (ordered most-specific first)
+    if any(w in g for w in ["fix", "bug", "debug", "resolve", "repair", "patch", "broken"]):
         strategy  = "diagnostic_repair"
         sub_goals = ["Reproduce issue", "Isolate root cause",
                      "Design fix", "Apply and verify", "Add regression test"]
-    elif any(w in g for w in ["should", "whether", "decide", "choose"]):
+    elif any(w in g for w in ["should", "whether", "decide", "choose", "pick", "select",
+                               "compare", "tradeoff", "best option"]):
         strategy  = "decision_framework"
         sub_goals = ["Define decision criteria", "Gather evidence",
                      "Analyze trade-offs", "Apply safety/ethics check", "Form verdict"]
+    elif any(w in g for w in ["analyze", "analyse", "evaluate", "assess", "review",
+                               "understand", "explain", "audit", "investigate", "research"]):
+        strategy  = "analytical_decomposition"
+        sub_goals = ["Gather data", "Define evaluation criteria",
+                     "Run analysis", "Synthesize findings", "Report conclusions"]
+    elif any(w in g for w in ["refactor", "clean", "reorganize", "restructure", "simplify",
+                               "improve", "optimize", "migrate", "upgrade"]):
+        strategy  = "iterative_refactor"
+        sub_goals = ["Characterize current state", "Define target state",
+                     "Identify high-risk changes", "Apply changes incrementally",
+                     "Verify no regression"]
+    elif any(w in g for w in ["build", "create", "implement", "develop", "write",
+                               "design", "add", "make", "generate", "deploy", "ship"]):
+        strategy  = "iterative_build"
+        sub_goals = ["Define requirements", "Design architecture",
+                     "Implement core", "Test and validate", "Deploy and monitor"]
+    elif any(w in g for w in ["learn", "study", "read", "find out"]):
+        strategy  = "learning_inquiry"
+        sub_goals = ["Identify knowledge gaps", "Locate authoritative sources",
+                     "Extract key concepts", "Validate understanding",
+                     "Summarize and apply"]
     else:
         strategy  = "general_decomposition"
-        sub_goals = ["Clarify scope", "Identify stakeholders",
+        sub_goals = ["Clarify scope and success criteria", "Identify stakeholders and constraints",
                      "Map dependencies", "Execute in phases", "Verify outcomes"]
+
+    # extract domain terms from the goal text to make the output goal-specific
+    stop = {"the", "a", "an", "is", "in", "on", "to", "of", "and", "or", "for",
+            "with", "by", "at", "from", "that", "this", "it", "be", "as", "are",
+            "was", "were", "should", "would", "could", "will", "can", "how", "what",
+            "when", "why", "where", "which", "who", "my", "our", "your", "i", "we"}
+    domain_terms = [
+        t for t in re.findall(r"[A-Za-z0-9_/-]+", goal)
+        if len(t) >= 4 and t.lower() not in stop
+    ][:5]
+
     return {
         "goal":                 goal,
         "best_known_strategy":  strategy,
         "sub_goals":            sub_goals,
-        "confidence":           0.75,
-        "note":                 "Heuristic decomposition — refine with domain knowledge",
+        "domain_terms":         domain_terms,
+        "confidence":           0.72,
+        "note": (
+            "Keyword-heuristic decomposition using domain terms extracted from your goal. "
+            "Sub-goals are a starting scaffold — refine with project-specific knowledge."
+        ),
     }
 
 log = logging.getLogger(__name__)
@@ -1092,21 +1225,21 @@ def _verify_claims_against_evidence(
             "pack_version": registry.pack_version,
         }
         if contradiction_score >= 0.8:
-            evaluated["status"] = "contradicted"
-            evaluated["verdict"] = "contradicted"
+            evaluated["status"] = "lexically_contradicted"
+            evaluated["verdict"] = "lexically_contradicted"
             evaluated["contradiction_score"] = round(contradiction_score, 4)
             contradicted_claims.append(evaluated)
             if contradiction_match:
                 aggregate_matches.append(contradiction_match)
         elif support_score >= 0.55 and not ((best_match or {}).get("tainted")):
-            evaluated["status"] = "supported"
-            evaluated["verdict"] = "supported"
+            evaluated["status"] = "lexically_supported"
+            evaluated["verdict"] = "lexically_supported"
             verified_claims.append(evaluated)
             if best_match:
                 aggregate_matches.append(best_match)
         else:
-            evaluated["status"] = "unsupported"
-            evaluated["verdict"] = "insufficient_evidence"
+            evaluated["status"] = "lexically_insufficient"
+            evaluated["verdict"] = "lexically_insufficient"
             if best_match and best_match.get("tainted"):
                 evaluated["tainted_evidence"] = True
             unsupported_claims.append(evaluated)
@@ -1117,11 +1250,11 @@ def _verify_claims_against_evidence(
     total = len(verified_claims) + len(unsupported_claims) + len(contradicted_claims)
     verification_score = round(len(verified_claims) / max(total, 1), 4)
     overall_verdict = (
-        "contradicted"
+        "lexically_contradicted"
         if contradicted_claims
-        else "insufficient_evidence"
+        else "lexically_insufficient"
         if unsupported_claims
-        else "supported"
+        else "lexically_supported"
     )
     material_meta = _material_usage(
         ["verification_gold", "attack_patterns"],
@@ -1131,10 +1264,16 @@ def _verify_claims_against_evidence(
         "verified_claims": verified_claims,
         "unsupported_claims": unsupported_claims,
         "contradicted_claims": contradicted_claims,
+        "lexical_support_score": verification_score,
         "verification_score": verification_score,
         "evidence_count": len(evidence),
-        "supported": overall_verdict == "supported",
+        "supported": overall_verdict == "lexically_supported",
         "verdict": overall_verdict,
+        "method_note": (
+            "Verdicts are Jaccard token-overlap against evidence text — "
+            "NOT semantic entailment or NLI. lexically_supported means "
+            ">=55% token overlap, not logical implication."
+        ),
         "evidence_matches": aggregate_matches,
         "attack_flags": _dedupe_flags(aggregate_attack_flags),
         "materials_used": material_meta["materials_used"],
@@ -1393,7 +1532,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_prove",
-            description="Execute ChimeraLang and generate a Merkle-chain integrity proof. Returns results + tamper-evident hash chain with root hash and verdict.",
+            description="Execute ChimeraLang and generate a Merkle-chain integrity proof. Returns results + tamper-evident hash chain with root hash and verdict. Vs. direct reasoning: produces a cryptographic hash chain that makes each reasoning step auditable and tamper-detectable — an LLM cannot self-certify its own reasoning steps this way.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1431,7 +1570,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_verify",
-            description="Verify claims against evidence blobs or references. Returns FEVER-style supported, contradicted, or insufficient-evidence verdicts with evidence matches and attack flags.",
+            description="Verify claims against evidence using lexical token-overlap scoring. Returns lexically_supported / lexically_contradicted / lexically_insufficient verdicts — IMPORTANT: verdicts are Jaccard token-overlap, not semantic entailment or NLI. Supplement with chimera_constrain for semantic checks. Vs. direct reasoning: provides explicit per-claim scores, curated verification_gold corpus matching, and prompt-injection attack-pattern detection.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1590,7 +1729,13 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_compress",
-            description="Compress text via contractions/symbols. Levels: light, medium, aggressive. Returns compressed text and compression ratio.",
+            description=(
+                "Compress text via contractions/symbols. Levels: light, medium, aggressive. "
+                "Returns compressed text and compression ratio. Token savings are automatically "
+                "recorded to chimera_dashboard (set auto_track=false to disable). "
+                "Prefer over manual regex replacement — the quantum algorithm uses structural "
+                "salience so important sentences near the task focus survive compression."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1618,6 +1763,21 @@ async def list_tools() -> list[Tool]:
                         "enum": ["quantum", "classic"],
                         "description": "Compression algorithm. quantum = structural salience compression. classic = legacy rewrite-only compression.",
                         "default": "quantum",
+                    },
+                    "auto_track": {
+                        "type": "boolean",
+                        "description": "Automatically record token savings to the cost tracker (visible in chimera_dashboard). Default true.",
+                        "default": True,
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Model name used for cost tracking (e.g. 'claude-sonnet-4-6'). Default: claude-sonnet-4-6.",
+                        "default": "claude-sonnet-4-6",
+                    },
+                    "namespace": {
+                        "type": "string",
+                        "description": "Cost tracker namespace (default: 'default').",
+                        "default": "default",
                     },
                 },
                 "required": ["text"],
@@ -1648,7 +1808,15 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_score",
-            description="Score messages 0–1 by importance (recency, type, density, replaceability). Lowest scores dropped first in lossy compression.",
+            description=(
+                "Score messages 0–1 for context-window management. "
+                "mode='drop_priority' (default): scores by recency+type+density — "
+                "lowest scores are dropped first in lossy compression. "
+                "mode='importance_for_goal': scores by alignment with the focus goal — "
+                "highest scores are most relevant to keep. "
+                "Vs. direct reasoning: O(n) tokenisation is far cheaper than asking the model "
+                "to rank N messages, which consumes O(N*content) prompt tokens."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1658,7 +1826,16 @@ async def list_tools() -> list[Tool]:
                     },
                     "focus": {
                         "type": "string",
-                        "description": "Optional task focus/query. Messages aligned with this focus score higher.",
+                        "description": "Task focus/query. Required for importance_for_goal mode; improves drop_priority scoring.",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["drop_priority", "importance_for_goal"],
+                        "default": "drop_priority",
+                        "description": (
+                            "drop_priority: score for compression — lowest scores evicted first. "
+                            "importance_for_goal: score by focus alignment — highest scores most relevant."
+                        ),
                     },
                 },
                 "required": ["messages"],
@@ -1840,7 +2017,16 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_deliberate",
-            description="Multi-perspective deliberation. Returns Jaccard consensus, divergence score, and most-consensus perspective.",
+            description=(
+                "Multi-perspective deliberation. Default mode 'semantic' uses stance detection + "
+                "prompt-term alignment + concept overlap — reports consensus_detected:true when "
+                ">=60% of perspectives share a stance AND avg_similarity>=0.62. "
+                "Mode 'lexical_consensus' uses raw Jaccard token overlap (faster, but misses "
+                "paraphrases — use only when vocabulary is controlled). "
+                "Vs. direct reasoning: externalises the perspective set so callers can inject "
+                "viewpoints not all present in one model pass, and provides a numeric divergence "
+                "score the model cannot compute on its own without a separate summarisation step."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1854,6 +2040,16 @@ async def list_tools() -> list[Tool]:
                                 "content":     {"type": "string"},
                             },
                         },
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["semantic", "lexical_consensus"],
+                        "default": "semantic",
+                        "description": (
+                            "semantic (default): stance+prompt-term+overlap similarity. "
+                            "lexical_consensus: raw Jaccard token overlap — fast but "
+                            "blind to paraphrases."
+                        ),
                     },
                 },
                 "required": ["prompt", "perspectives"],
@@ -2130,7 +2326,11 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="chimera_summarize",
-            description="LLM-free extractive summarizer. Ranks sentences by TF-IDF and returns top N. Use before passing long docs to other tools.",
+            description=(
+                "LLM-free extractive summarizer. Ranks sentences by TF-IDF and returns top N. "
+                "Token savings are automatically recorded to chimera_dashboard (set auto_track=false to disable). "
+                "Use before passing long docs to other tools."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -2144,6 +2344,21 @@ async def list_tools() -> list[Tool]:
                         "type": "integer",
                         "description": "Minimum sentences to keep. Default 3.",
                         "default": 3,
+                    },
+                    "auto_track": {
+                        "type": "boolean",
+                        "description": "Automatically record token savings to the cost tracker (visible in chimera_dashboard). Default true.",
+                        "default": True,
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Model name for cost tracking. Default: claude-sonnet-4-6.",
+                        "default": "claude-sonnet-4-6",
+                    },
+                    "namespace": {
+                        "type": "string",
+                        "description": "Cost tracker namespace (default: 'default').",
+                        "default": "default",
                     },
                 },
                 "required": ["text"],
@@ -2268,6 +2483,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             unique_vals    = set(b["str"] for b in branches)
             divergence     = (len(unique_vals) - 1) / max(len(branches) - 1, 1)
             trivial        = divergence == 0.0
+            all_unique     = divergence >= 1.0
 
             if strategy == "highest_confidence":
                 winner       = max(branches, key=lambda b: b["confidence"])
@@ -2303,12 +2519,19 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "unique_values":     len(unique_vals),
                 "divergence_ratio":  round(divergence, 4),
                 "trivial_consensus": trivial,
+                "all_unique":        all_unique,
             }
             if trivial:
                 result["warning"] = (
                     "All branches returned identical values — trivial consensus. "
                     "No genuine divergence detected. Use independent reasoning paths "
                     "for real consensus signal."
+                )
+            elif all_unique:
+                result["warning"] = (
+                    "All branches returned completely different values (divergence=1.0). "
+                    "No consensus is possible — the gate winner is an arbitrary pick. "
+                    "Review your branches; they may be answering different questions."
                 )
             if not passed:
                 result["warning"] = (
@@ -3377,11 +3600,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         elif name == "chimera_compress":
             import re as _re
 
-            text = arguments["text"]
-            level = arguments.get("level", "medium")
+            text          = arguments["text"]
+            level         = arguments.get("level", "medium")
             preserve_code = bool(arguments.get("preserve_code", True))
-            algorithm = str(arguments.get("algorithm", "quantum")).lower()
-            focus = _resolve_focus(arguments, prompt=text)
+            algorithm     = str(arguments.get("algorithm", "quantum")).lower()
+            focus         = _resolve_focus(arguments, prompt=text)
+            auto_track    = bool(arguments.get("auto_track", True))
+            track_model   = arguments.get("model", _DEFAULT_MODEL)
+            namespace     = _state_namespace(arguments)
 
             if algorithm == "quantum":
                 strategies = ["whitespace", "strip_filler"]
@@ -3396,7 +3622,15 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 )
                 saved = result.original_chars - result.compressed_chars
                 ratio = round(saved / result.original_chars, 4) if result.original_chars else 0.0
-                return _ok({
+                track_entry: dict[str, Any] | None = None
+                if auto_track and result.original_tokens > result.compressed_tokens:
+                    track_entry = _get_cost_tracker(namespace).record(
+                        tokens_before=result.original_tokens,
+                        tokens_after=result.compressed_tokens,
+                        model=track_model,
+                        label="chimera_compress/quantum",
+                    )
+                payload: dict[str, Any] = {
                     "compressed_text": result.text,
                     "level": level,
                     "original_chars": result.original_chars,
@@ -3411,7 +3645,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     "focus_terms": result.focus_terms,
                     "units_total": result.units_total,
                     "units_kept": result.units_kept,
-                })
+                }
+                if track_entry:
+                    payload["tracked"] = {"request_id": track_entry["request_id"],
+                                          "savings_usd": track_entry["savings"]}
+                return _ok(payload)
 
             original_len = len(text)
 
@@ -3464,11 +3702,20 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 for i, block in enumerate(code_blocks):
                     work = work.replace(f"\x00CODE{i}\x00", block)
 
-            compressed_len = len(work)
-            saved          = original_len - compressed_len
-            ratio          = round(saved / original_len, 4) if original_len else 0.0
-
-            return _ok({
+            compressed_len   = len(work)
+            saved            = original_len - compressed_len
+            ratio            = round(saved / original_len, 4) if original_len else 0.0
+            tokens_before_c  = max(1, round(original_len / 4))
+            tokens_after_c   = max(0, round(compressed_len / 4))
+            classic_track: dict[str, Any] | None = None
+            if auto_track and tokens_before_c > tokens_after_c:
+                classic_track = _get_cost_tracker(namespace).record(
+                    tokens_before=tokens_before_c,
+                    tokens_after=tokens_after_c,
+                    model=track_model,
+                    label="chimera_compress/classic",
+                )
+            classic_payload: dict[str, Any] = {
                 "compressed_text": work,
                 "level": level,
                 "original_chars": original_len,
@@ -3479,7 +3726,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "code_blocks_preserved": len(code_blocks),
                 "algorithm": "classic",
                 "focus_terms": extract_focus_terms(focus),
-            })
+            }
+            if classic_track:
+                classic_payload["tracked"] = {"request_id": classic_track["request_id"],
+                                               "savings_usd": classic_track["savings"]}
+            return _ok(classic_payload)
 
         # ── chimera_budget ────────────────────────────────────────────────
         elif name == "chimera_budget":
@@ -3508,16 +3759,59 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         # ── chimera_score ────────────────────────────────────────────────
         elif name == "chimera_score":
             messages = arguments.get("messages", [])
-            focus = _resolve_focus(arguments, messages=messages)
+            focus    = _resolve_focus(arguments, messages=messages)
+            mode     = arguments.get("mode", "drop_priority")
             if not messages:
                 return _ok([])
+            if mode == "importance_for_goal":
+                focus_terms_set = set(extract_focus_terms(focus))
+                scored: list[dict[str, Any]] = []
+                for idx, msg in enumerate(messages):
+                    content = normalize_content(msg.get("content", ""))
+                    content_terms = set(t for t in re.findall(r"[A-Za-z0-9_./:-]+", content.lower()) if len(t) >= 3)
+                    # Importance-for-goal: weight focus alignment 60%, structural signal 20%,
+                    # content density 10%, user-question bonus 10%.
+                    focus_score   = (
+                        len(content_terms & focus_terms_set) / max(len(focus_terms_set), 1)
+                        if focus_terms_set else 0.0
+                    )
+                    density_score = min(len(content_terms) / 80.0, 1.0)
+                    structure_score = 0.2 if "```" in content else 0.0
+                    question_bonus  = 0.1 if ("?" in content and msg.get("role") == "user") else 0.0
+                    importance = min(1.0, focus_score * 0.60 + density_score * 0.10
+                                     + structure_score * 0.20 + question_bonus)
+                    reason = (
+                        "focus_match"      if focus_score > 0.1
+                        else "code_fence"  if structure_score > 0
+                        else "user_question" if question_bonus > 0
+                        else "low_focus_alignment"
+                    )
+                    scored.append({
+                        "index":       idx,
+                        "role":        msg.get("role", "unknown"),
+                        "score":       round(importance, 4),
+                        "focus_score": round(focus_score, 4),
+                        "reason":      reason,
+                    })
+                scored.sort(key=lambda item: item["score"], reverse=True)
+                return _ok({
+                    "scores":             scored,
+                    "total_messages":     len(messages),
+                    "mode":               "importance_for_goal",
+                    "focus_terms":        list(focus_terms_set),
+                    "token_count_method": _tbm.get_stats()["token_count_method"],
+                    "note": "Sorted descending — highest score = most relevant to focus.",
+                })
+            # Default: drop_priority (lowest score = evict first)
             ranked = _scorer.rank(messages, focus=focus)
             return _ok({
-                "scores": ranked,
-                "total_messages": len(messages),
+                "scores":             ranked,
+                "total_messages":     len(messages),
+                "mode":               "drop_priority",
                 "token_count_method": _tbm.get_stats()["token_count_method"],
-                "algorithm": "quantum",
-                "focus_terms": extract_focus_terms(focus),
+                "algorithm":          "quantum",
+                "focus_terms":        extract_focus_terms(focus),
+                "note": "Sorted ascending — lowest score = evict first during compression.",
             })
 
         # ── AGI: chimera_causal ────────────────────────────────────────────
@@ -3549,7 +3843,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         elif name == "chimera_deliberate":
             prompt       = arguments.get("prompt", "")
             perspectives = arguments.get("perspectives", [])
-            return _ok(_get_deliberation().deliberate(prompt, perspectives))
+            mode         = arguments.get("mode", "semantic")
+            return _ok(_get_deliberation().deliberate(prompt, perspectives, mode=mode))
 
         # ── AGI: chimera_metacognize ───────────────────────────────────────
         elif name == "chimera_metacognize":
@@ -4217,6 +4512,9 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             text          = arguments["text"]
             ratio         = float(arguments.get("ratio", 0.25))
             min_sentences = int(arguments.get("min_sentences", 3))
+            auto_track    = bool(arguments.get("auto_track", True))
+            track_model   = arguments.get("model", _DEFAULT_MODEL)
+            namespace     = _state_namespace(arguments)
 
             sentences = [s.strip() for s in _re.split(r"(?<=[.!?])\s+", text) if s.strip()]
             if not sentences:
@@ -4267,7 +4565,16 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             ta          = _tbm.count_tokens(summary)
             savings_pct = round((1 - ta / max(tb, 1)) * 100, 1)
 
-            return _ok({
+            summ_track: dict[str, Any] | None = None
+            if auto_track and tb > ta:
+                summ_track = _get_cost_tracker(namespace).record(
+                    tokens_before=tb,
+                    tokens_after=ta,
+                    model=track_model,
+                    label="chimera_summarize",
+                )
+
+            summ_payload: dict[str, Any] = {
                 "summary":          summary,
                 "sentences_in":     len(sentences),
                 "sentences_out":    n_keep,
@@ -4275,7 +4582,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "tokens_before":    tb,
                 "tokens_after":     ta,
                 "savings_pct":      savings_pct,
-            })
+            }
+            if summ_track:
+                summ_payload["tracked"] = {"request_id": summ_track["request_id"],
+                                            "savings_usd": summ_track["savings"]}
+            return _ok(summ_payload)
 
         else:
             return _err(f"Unknown tool: {name}")

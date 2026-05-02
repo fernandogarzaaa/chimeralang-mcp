@@ -108,7 +108,7 @@ class TestMaterialsIntegration(unittest.TestCase):
         self.assertEqual(len(result["verified_claims"]), 1)
         self.assertEqual(len(result["contradicted_claims"]), 1)
         self.assertEqual(len(result["unsupported_claims"]), 1)
-        self.assertEqual(result["verdict"], "contradicted")
+        self.assertEqual(result["verdict"], "lexically_contradicted")
         self.assertIn("attack_patterns", result["pack_versions"])
 
     def test_verify_marks_tainted_evidence_with_attack_flags(self):
@@ -122,7 +122,7 @@ class TestMaterialsIntegration(unittest.TestCase):
                 ],
             },
         )
-        self.assertEqual(result["verdict"], "insufficient_evidence")
+        self.assertEqual(result["verdict"], "lexically_insufficient")
         self.assertGreaterEqual(len(result["attack_flags"]), 1)
 
     def test_detect_and_safety_check_surface_security_categories(self):
