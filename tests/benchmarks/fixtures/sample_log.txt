@@ -1,0 +1,33 @@
+2025-05-03T10:00:01Z INFO  starting build
+2025-05-03T10:00:01Z INFO  loading config from /etc/build.yml
+2025-05-03T10:00:01Z INFO  resolved 412 packages
+2025-05-03T10:00:01Z INFO  cache hit for boost@1.83.0
+2025-05-03T10:00:01Z INFO  cache hit for openssl@3.2.1
+2025-05-03T10:00:02Z INFO  compiling src/main.cpp
+2025-05-03T10:00:02Z INFO  compiling src/util.cpp
+2025-05-03T10:00:02Z INFO  compiling src/io.cpp
+2025-05-03T10:00:02Z INFO  compiling src/parser.cpp
+2025-05-03T10:00:03Z INFO  compiling src/network.cpp
+2025-05-03T10:00:03Z INFO  compiling src/auth.cpp
+2025-05-03T10:00:04Z INFO  compiling src/db.cpp
+2025-05-03T10:00:04Z INFO  compiling src/cache.cpp
+2025-05-03T10:00:05Z INFO  compiling src/scheduler.cpp
+2025-05-03T10:00:05Z INFO  compiling src/worker.cpp
+2025-05-03T10:00:05Z INFO  compiling src/metrics.cpp
+2025-05-03T10:00:06Z INFO  compiling src/logger.cpp
+2025-05-03T10:00:06Z INFO  compiling src/config.cpp
+2025-05-03T10:00:06Z WARNING src/util.cpp:142:9: deprecated declaration of std::auto_ptr
+2025-05-03T10:00:07Z INFO  compiling src/serializer.cpp
+2025-05-03T10:00:07Z INFO  compiling src/dispatcher.cpp
+2025-05-03T10:00:08Z INFO  compiling src/router.cpp
+2025-05-03T10:00:08Z INFO  compiling src/handler.cpp
+2025-05-03T10:00:09Z INFO  compiling src/server.cpp
+2025-05-03T10:00:09Z INFO  compiling src/client.cpp
+2025-05-03T10:00:10Z INFO  linking libcore.so
+2025-05-03T10:00:10Z INFO  linking libplatform.so
+2025-05-03T10:00:11Z ERROR src/handler.cpp:88:23: undefined reference to `Auth::verify_token(std::string const&)'
+2025-05-03T10:00:11Z ERROR collect2: error: ld returned 1 exit status
+2025-05-03T10:00:11Z FATAL build failed: linker exit code 1
+2025-05-03T10:00:11Z INFO  cleaning up build directory
+2025-05-03T10:00:11Z INFO  uploading partial artifacts to s3://builds/run-9182734
+2025-05-03T10:00:12Z INFO  build run-9182734 finished in 11.4s with status=failure

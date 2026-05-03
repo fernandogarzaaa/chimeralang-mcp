@@ -6,6 +6,50 @@
           {
             "type": "command",
             "command": "pip install -e . -q 2>/dev/null || true"
+          },
+          {
+            "type": "command",
+            "command": "python -m chimeralang_mcp.cli hook --event session-start"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m chimeralang_mcp.cli hook --event user-prompt"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m chimeralang_mcp.cli hook --event post-tool-use"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m chimeralang_mcp.cli hook --event pre-tool-use"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m chimeralang_mcp.cli hook --event stop"
           }
         ]
       }

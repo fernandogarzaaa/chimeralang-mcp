@@ -17,6 +17,7 @@ Tools exposed to Claude:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import re
@@ -929,9 +930,450 @@ def _save_cost_tracker(namespace: str) -> str:
 
 # ── helpers ───────────────────────────────────────────────────────────────
 
+# Tools that already report budget/cost data inline — skip advisory injection
+# to avoid duplicate or recursive accounting.
+_BUDGET_NATIVE_TOOLS: frozenset[str] = frozenset({
+    "chimera_dashboard",
+    "chimera_budget",
+    "chimera_budget_lock",
+    "chimera_cost_track",
+    "chimera_cost_estimate",
+    "chimera_csm",
+    "chimera_overhead_audit",
+    "chimera_session_report",
+})
+
+# Tools whose outputs are already deliberately compressed/raw — never
+# re-compress (would mangle the user-requested output and double-bill savings).
+_NO_AUTO_COMPRESS_TOOLS: frozenset[str] = _BUDGET_NATIVE_TOOLS | frozenset({
+    "chimera_compress",
+    "chimera_optimize",
+    "chimera_fracture",
+    "chimera_summarize",
+    "chimera_log_compress",
+    "chimera_cache_mark",
+    "chimera_dedup_lookup",
+})
+
+# Field-level compression thresholds and exclusions.
+_RESPONSE_COMPRESS_THRESHOLD = 4000
+_FIELD_COMPRESS_MIN_CHARS = 1500
+_NEVER_COMPRESS_KEYS: frozenset[str] = frozenset({
+    "id", "request_id", "envelope_id", "tool_use_id", "session_id",
+    "hash", "hash_chain", "signature", "digest", "checksum",
+    "model", "namespace", "kind", "version", "envelope_version",
+    "pack_version", "path", "storage_path", "url", "uri",
+    "timestamp", "created_at", "locked_at",
+    "_chimera_session_budget", "_chimera_compressed_fields",
+})
+
+
+def _walk_compress(
+    node: Any,
+    path: list[str],
+    compressed: list[dict[str, Any]],
+) -> Any:
+    if isinstance(node, dict):
+        return {
+            key: (
+                value
+                if key in _NEVER_COMPRESS_KEYS
+                else _walk_compress(value, path + [str(key)], compressed)
+            )
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [_walk_compress(v, path + [str(i)], compressed) for i, v in enumerate(node)]
+    if isinstance(node, str) and len(node) >= _FIELD_COMPRESS_MIN_CHARS:
+        stripped = node.lstrip()
+        if not stripped or stripped[0] in '{[':
+            return node  # JSON-shaped — preserve structure
+        try:
+            result = _quantum.optimize_text(node, level="medium", preserve_code=True)
+        except Exception:
+            return node
+        if result.compressed_chars < len(node):
+            compressed.append({
+                "path": ".".join(path) or "<root>",
+                "original_chars": result.original_chars,
+                "compressed_chars": result.compressed_chars,
+                "tokens_saved": result.original_tokens - result.compressed_tokens,
+            })
+            return result.text
+    return node
+
+
+def _maybe_compress_oversized(
+    tool_name: str,
+    data: dict[str, Any],
+    rendered_size: int,
+) -> dict[str, Any]:
+    if (
+        tool_name in _NO_AUTO_COMPRESS_TOOLS
+        or rendered_size < _RESPONSE_COMPRESS_THRESHOLD
+    ):
+        return data
+    compressed: list[dict[str, Any]] = []
+    walked = _walk_compress(data, [], compressed)
+    if not compressed:
+        return data
+    walked["_chimera_compressed_fields"] = compressed
+    return walked
+
+
+# ── tool-call dedup cache (content-hash) ──────────────────────────────────
+# Inspired by Opencode-DCP and ToolCacheAgent: collapse repeated tool calls so
+# the same Read/Bash/etc never spends tokens twice in a session. Persistence
+# uses the existing PersistentNamespaceStore so the cache survives between
+# hook subprocesses.
+_DEDUP_KIND = "dedup_cache"
+_DEDUP_MAX_ENTRIES = 256
+_DEDUP_PREVIEW_CHARS = 200
+
+
+def _dedup_store_previews() -> bool:
+    """Previews include raw tool input/output substrings — for Read/Bash/Write
+    that can be sensitive (file contents, command output, secrets). Default
+    OFF; opt in via CHIMERA_DEDUP_STORE_PREVIEWS=1."""
+    import os
+    return os.environ.get("CHIMERA_DEDUP_STORE_PREVIEWS", "0").lower() in ("1", "true", "yes")
+
+
+def _dedup_key(tool_name: str, tool_input: Any) -> str:
+    try:
+        canonical = json.dumps(tool_input, sort_keys=True, ensure_ascii=True, default=str)
+    except Exception:
+        canonical = str(tool_input)
+    return _hashlib.sha256(f"{tool_name}\x00{canonical}".encode("utf-8")).hexdigest()[:16]
+
+
+def _dedup_load(namespace: str) -> list[dict[str, Any]]:
+    raw = _store.load(_DEDUP_KIND, namespace, [])
+    return raw if isinstance(raw, list) else []
+
+
+def _dedup_lookup(namespace: str, key: str) -> dict[str, Any] | None:
+    for entry in _dedup_load(namespace):
+        if entry.get("key") == key:
+            return entry
+    return None
+
+
+def _dedup_record(
+    namespace: str,
+    tool_name: str,
+    tool_input: Any,
+    response_text: str,
+) -> dict[str, Any]:
+    key = _dedup_key(tool_name, tool_input)
+    entries = _dedup_load(namespace)
+    now = time.time()
+    response_hash = _hashlib.sha256(response_text.encode("utf-8", "replace")).hexdigest()[:16]
+    store_previews = _dedup_store_previews()
+    for idx, entry in enumerate(entries):
+        if entry.get("key") == key:
+            entry["hit_count"] = int(entry.get("hit_count") or 0) + 1
+            entry["last_seen"] = now
+            entry["response_chars"] = len(response_text)
+            entry["response_hash"] = response_hash
+            if store_previews:
+                entry["response_preview"] = response_text[:_DEDUP_PREVIEW_CHARS]
+            else:
+                entry.pop("response_preview", None)
+            # LRU: move hit entry to the end so frequently-used entries
+            # survive the trim window.
+            if idx != len(entries) - 1:
+                entries.append(entries.pop(idx))
+            _store.save(_DEDUP_KIND, namespace, entries)
+            return entry
+    entry = {
+        "key": key,
+        "tool_name": tool_name,
+        "response_chars": len(response_text),
+        "response_hash": response_hash,
+        "first_seen": now,
+        "last_seen": now,
+        "hit_count": 0,
+    }
+    if store_previews:
+        if isinstance(tool_input, str):
+            input_preview = tool_input[:_DEDUP_PREVIEW_CHARS]
+        else:
+            try:
+                input_preview = json.dumps(tool_input, default=str)[:_DEDUP_PREVIEW_CHARS]
+            except Exception:
+                input_preview = str(tool_input)[:_DEDUP_PREVIEW_CHARS]
+        entry["tool_input_preview"] = input_preview
+        entry["response_preview"] = response_text[:_DEDUP_PREVIEW_CHARS]
+    entries.append(entry)
+    if len(entries) > _DEDUP_MAX_ENTRIES:
+        entries = entries[-_DEDUP_MAX_ENTRIES:]
+    _store.save(_DEDUP_KIND, namespace, entries)
+    return entry
+
+
+def _dedup_clear(namespace: str) -> int:
+    n = len(_dedup_load(namespace))
+    _store.save(_DEDUP_KIND, namespace, [])
+    return n
+
+
+# ── log compression (errors-verbatim, body-abridged) ──────────────────────
+# Inspired by claude-context-saver: build/test/install logs are mostly noise
+# around a few error lines. Keep the signal verbatim, abridge the rest.
+_LOG_KEEP_PATTERNS_DEFAULT = (
+    "error", "warn", "fail", "fatal", "panic",
+    "exception", "traceback", "stack trace", "assertionerror",
+)
+
+
+def _compress_log(
+    text: str,
+    keep_patterns: list[str] | None = None,
+    head_lines: int = 50,
+    tail_lines: int = 100,
+    context_lines: int = 2,
+) -> dict[str, Any]:
+    patterns = [p.lower() for p in (keep_patterns or _LOG_KEEP_PATTERNS_DEFAULT)]
+    lines = text.splitlines()
+    n = len(lines)
+    keep = [False] * n
+    for i in range(min(head_lines, n)):
+        keep[i] = True
+    for i in range(max(0, n - tail_lines), n):
+        keep[i] = True
+    matches = 0
+    for i, line in enumerate(lines):
+        low = line.lower()
+        if any(p in low for p in patterns):
+            keep[i] = True
+            matches += 1
+            for j in range(max(0, i - context_lines), min(n, i + context_lines + 1)):
+                keep[j] = True
+    out_lines: list[str] = []
+    skipped_run = 0
+    for i, line in enumerate(lines):
+        if keep[i]:
+            if skipped_run:
+                out_lines.append(f"[... {skipped_run} line(s) abridged ...]")
+                skipped_run = 0
+            out_lines.append(line)
+        else:
+            skipped_run += 1
+    if skipped_run:
+        out_lines.append(f"[... {skipped_run} line(s) abridged ...]")
+    compressed = "\n".join(out_lines)
+    raw_ratio = 1 - len(compressed) / max(len(text), 1)
+    return {
+        "compressed_text": compressed,
+        "lines_in": n,
+        "lines_out": len(out_lines),
+        "lines_kept_verbatim": sum(keep),
+        "matches_kept": matches,
+        "original_chars": len(text),
+        "compressed_chars": len(compressed),
+        "chars_saved": max(0, len(text) - len(compressed)),
+        "reduction_ratio": round(max(0.0, min(1.0, raw_ratio)), 4),
+    }
+
+
+# ── Anthropic prompt-cache mark builder ───────────────────────────────────
+# Inspired by Distill: the cleanest token win is lossless. Anthropic's prompt
+# cache gives 75-90% off cached tokens vs 0% for compression-on-stable-content.
+# This tool returns blocks ready to drop into the SDK's `system` parameter.
+_CACHE_MIN_TOKENS_BY_MODEL_PREFIX: tuple[tuple[str, int], ...] = (
+    ("claude-haiku", 2048),
+    ("claude-sonnet", 1024),
+    ("claude-opus", 1024),
+)
+_CACHE_MAX_BREAKPOINTS = 4
+
+
+def _cache_min_tokens(model: str) -> int:
+    low = (model or "").lower()
+    for prefix, threshold in _CACHE_MIN_TOKENS_BY_MODEL_PREFIX:
+        if prefix in low:
+            return threshold
+    return 1024
+
+
+def _build_cache_blocks(
+    blocks: list[dict[str, Any]],
+    model: str,
+    max_breakpoints: int = _CACHE_MAX_BREAKPOINTS,
+) -> dict[str, Any]:
+    min_tokens = _cache_min_tokens(model)
+    output: list[dict[str, Any]] = []
+    breakpoints_used = 0
+    cache_eligible_tokens = 0
+    skipped_too_small: list[dict[str, Any]] = []
+    for raw in blocks:
+        text = str(raw.get("text") or "")
+        name = str(raw.get("name") or f"block_{len(output)}")
+        stable = bool(raw.get("stable", True))
+        tok = _tbm.count_tokens(text)
+        block_out: dict[str, Any] = {
+            "name": name,
+            "text": text,
+            "estimated_tokens": tok,
+            "stable": stable,
+        }
+        if not stable:
+            output.append(block_out)
+            continue
+        if tok < min_tokens:
+            skipped_too_small.append({"name": name, "tokens": tok, "min_required": min_tokens})
+            output.append(block_out)
+            continue
+        if breakpoints_used >= max_breakpoints:
+            output.append(block_out)
+            continue
+        block_out["cache_control"] = {"type": "ephemeral"}
+        cache_eligible_tokens += tok
+        breakpoints_used += 1
+        output.append(block_out)
+    return {
+        "blocks": output,
+        "model": model,
+        "min_tokens_per_block": min_tokens,
+        "max_breakpoints": max_breakpoints,
+        "breakpoints_used": breakpoints_used,
+        "cache_eligible_tokens": cache_eligible_tokens,
+        "estimated_savings_at_75pct": int(cache_eligible_tokens * 0.75),
+        "estimated_savings_at_90pct": int(cache_eligible_tokens * 0.90),
+        "skipped_too_small": skipped_too_small,
+        "advisory": (
+            "Insert blocks as the `system` array in your Anthropic SDK call. "
+            "Cache hits are charged at 10% of base token cost (90% off) for "
+            "models that support 1h cache, or 25% (75% off) for the default "
+            "5-min ephemeral cache."
+        ),
+    }
+
+
+# ── overhead audit (system + tool defs + MCP server cost) ─────────────────
+# Inspired by alexgreensh/token-optimizer: the model's "ghost" baseline cost
+# (system prompt, tool definitions, MCP server registrations) is invisible
+# but recurring. Surface it so users can prune.
+def _audit_overhead(
+    system_prompt: str | None,
+    tool_definitions: list[dict[str, Any]],
+    mcp_servers: list[dict[str, Any]],
+) -> dict[str, Any]:
+    sys_tokens = _tbm.count_tokens(system_prompt or "")
+    tool_breakdown: list[dict[str, Any]] = []
+    tool_tokens_total = 0
+    for td in tool_definitions or []:
+        tname = str(td.get("name") or "<unnamed>")
+        desc = str(td.get("description") or "")
+        schema = td.get("schema") or td.get("input_schema") or td.get("inputSchema") or {}
+        try:
+            schema_text = json.dumps(schema, separators=(",", ":"), default=str)
+        except Exception:
+            schema_text = str(schema)
+        tok = _tbm.count_tokens(tname) + _tbm.count_tokens(desc) + _tbm.count_tokens(schema_text)
+        tool_tokens_total += tok
+        tool_breakdown.append({"name": tname, "tokens": tok})
+    tool_breakdown.sort(key=lambda r: r["tokens"], reverse=True)
+    server_breakdown: list[dict[str, Any]] = []
+    for srv_def in mcp_servers or []:
+        sname = str(srv_def.get("name") or "<unnamed>")
+        tools_n = int(srv_def.get("tool_count") or 0)
+        avg_tok = int(srv_def.get("avg_tokens_per_tool") or 250)
+        server_breakdown.append({
+            "name": sname,
+            "tool_count": tools_n,
+            "estimated_tokens": tools_n * avg_tok,
+        })
+    server_total = sum(s["estimated_tokens"] for s in server_breakdown)
+    grand_total = sys_tokens + tool_tokens_total + server_total
+    if grand_total < 5000:
+        advisory = "lean: baseline overhead is light"
+    elif grand_total < 15000:
+        advisory = "moderate: baseline overhead is noticeable on every turn"
+    else:
+        advisory = "heavy: every turn pays this cost — consider disabling unused MCP servers or trimming tool defs"
+    return {
+        "system_prompt_tokens": sys_tokens,
+        "tool_definitions_tokens": tool_tokens_total,
+        "tool_breakdown_top": tool_breakdown[:10],
+        "mcp_servers_tokens": server_total,
+        "mcp_server_breakdown": server_breakdown,
+        "grand_total_tokens": grand_total,
+        "advisory": advisory,
+    }
+
+
+# Per-call context: (tool_name, namespace). Populated in call_tool, read in _ok.
+_call_context: contextvars.ContextVar[tuple[str, str] | None] = contextvars.ContextVar(
+    "chimera_call_context", default=None
+)
+
+
+def _budget_snapshot(tool_name: str, namespace: str) -> dict[str, Any]:
+    """Cheap snapshot of session token budget — never raises."""
+    try:
+        summary = _get_cost_tracker(namespace).summary()
+    except Exception:
+        summary = {"request_count": 0, "total_tokens_saved": 0, "avg_pct_saved": 0.0}
+    lock = _session_budget
+    locked = bool(lock.get("locked"))
+    max_tokens = lock.get("max_output_tokens")
+    generated = int(lock.get("tokens_generated") or 0)
+    remaining: int | None
+    if locked and isinstance(max_tokens, int):
+        remaining = max(max_tokens - generated, 0)
+    else:
+        remaining = None
+    if locked and remaining is not None and max_tokens:
+        if remaining <= 0:
+            advisory = "lock_exhausted: refuse further generation or extend lock"
+        elif remaining < max_tokens * 0.1:
+            advisory = "lock_critical: <10% of locked budget remaining"
+        elif remaining < max_tokens * 0.3:
+            advisory = "lock_warn: <30% of locked budget remaining"
+        else:
+            advisory = "lock_ok"
+    elif locked:
+        advisory = "lock_active_but_unbounded"
+    else:
+        advisory = "no_lock_set: call chimera_budget_lock to enforce a per-session cap"
+    return {
+        "tool": tool_name,
+        "namespace": namespace,
+        "lock_active": locked,
+        "lock_max_output_tokens": max_tokens,
+        "lock_tokens_generated": generated,
+        "lock_tokens_remaining": remaining,
+        "session_requests_tracked": summary.get("request_count", 0),
+        "session_tokens_saved": summary.get("total_tokens_saved", 0),
+        "session_avg_pct_saved": summary.get("avg_pct_saved", 0.0),
+        "advisory": advisory,
+    }
+
+
 def _ok(data: Any) -> CallToolResult:
+    ctx = _call_context.get()
+    if (
+        ctx is not None
+        and isinstance(data, dict)
+        and ctx[0] not in _BUDGET_NATIVE_TOOLS
+        and "_chimera_session_budget" not in data
+    ):
+        try:
+            data = {**data, "_chimera_session_budget": _budget_snapshot(*ctx)}
+        except Exception:
+            pass  # advisory must never break a tool call
+    rendered = json.dumps(data, indent=2)
+    if ctx is not None and isinstance(data, dict):
+        try:
+            recompressed = _maybe_compress_oversized(ctx[0], data, len(rendered))
+        except Exception:
+            recompressed = data
+        if recompressed is not data:
+            rendered = json.dumps(recompressed, indent=2)
     return CallToolResult(
-        content=[TextContent(type="text", text=json.dumps(data, indent=2))],
+        content=[TextContent(type="text", text=rendered)],
         isError=False,
     )
 
@@ -1144,6 +1586,19 @@ def _verify_claims_against_evidence(
     registry = _get_materials()
     evidence_texts = [_evidence_text(item) for item in evidence]
     evidence_blob = "\n".join(evidence_texts).lower()
+    evidence_lower = [text.lower() for text in evidence_texts]
+    evidence_tokens = [_tokenize_for_match(text) for text in evidence_texts]
+    evidence_attacks = [registry.find_attack_matches(text) for text in evidence_texts]
+    gold_index: dict[str, tuple[dict[str, Any], list[set[str]]]] = {}
+    for record in registry.pack("verification_gold"):
+        key = str(record.get("claim", "")).strip().lower()
+        if not key or key in gold_index:
+            continue
+        exemplar_tokens = [
+            _tokenize_for_match(str(exemplar))
+            for exemplar in record.get("evidence", [])
+        ]
+        gold_index[key] = (record, exemplar_tokens)
     verified_claims: list[dict[str, Any]] = []
     unsupported_claims: list[dict[str, Any]] = []
     contradicted_claims: list[dict[str, Any]] = []
@@ -1156,14 +1611,11 @@ def _verify_claims_against_evidence(
         if not claim_text:
             continue
         claim_tokens = _tokenize_for_match(claim_text)
-        gold_record = next(
-            (
-                record
-                for record in registry.pack("verification_gold")
-                if str(record.get("claim", "")).strip().lower() == claim_text.lower()
-            ),
-            None,
-        )
+        claim_lower = claim_text.lower()
+        claim_token_count = max(len(claim_tokens), 1)
+        gold_pair = gold_index.get(claim_lower)
+        gold_record, gold_exemplars = gold_pair if gold_pair else (None, [])
+        gold_verdict = str(gold_record.get("verdict", "")) if gold_record else ""
         support_score = 0.0
         contradiction_score = 0.0
         best_match: dict[str, Any] | None = None
@@ -1171,28 +1623,28 @@ def _verify_claims_against_evidence(
         claim_attack_flags: list[dict[str, Any]] = []
 
         for idx, evidence_text in enumerate(evidence_texts):
-            normalized = evidence_text.lower()
-            overlap = claim_tokens.intersection(_tokenize_for_match(normalized))
-            score = len(overlap) / max(len(claim_tokens), 1)
-            if claim_text.lower() in normalized:
+            normalized = evidence_lower[idx]
+            ev_tokens = evidence_tokens[idx]
+            overlap = claim_tokens.intersection(ev_tokens)
+            score = len(overlap) / claim_token_count
+            if claim_lower in normalized:
                 score = max(score, 1.0)
             if gold_record:
-                exemplar_scores = []
-                for exemplar in gold_record.get("evidence", []):
-                    exemplar_tokens = _tokenize_for_match(str(exemplar))
-                    exemplar_scores.append(
-                        len(exemplar_tokens.intersection(_tokenize_for_match(evidence_text))) / max(len(exemplar_tokens), 1)
-                    )
-                exemplar_score = max(exemplar_scores or [0.0])
+                exemplar_score = 0.0
+                for exemplar_tokens in gold_exemplars:
+                    if not exemplar_tokens:
+                        continue
+                    s = len(exemplar_tokens.intersection(ev_tokens)) / len(exemplar_tokens)
+                    if s > exemplar_score:
+                        exemplar_score = s
                 if exemplar_score >= 0.45:
-                    gold_verdict = str(gold_record.get("verdict", ""))
                     if gold_verdict == "supported":
                         score = max(score, 0.92)
                     elif gold_verdict == "contradicted":
                         contradiction_score = max(contradiction_score, 0.9)
                     elif gold_verdict == "insufficient_evidence":
                         score = min(score, 0.35)
-            attack_flags = registry.find_attack_matches(evidence_text)
+            attack_flags = evidence_attacks[idx]
             if attack_flags:
                 claim_attack_flags.extend(attack_flags)
                 aggregate_attack_flags.extend(attack_flags)
@@ -2364,6 +2816,149 @@ async def list_tools() -> list[Tool]:
                 "required": ["text"],
             },
         ),
+        Tool(
+            name="chimera_cache_mark",
+            description=(
+                "Build Anthropic prompt-cache markers for stable text blocks "
+                "(system prompt, CLAUDE.md, tool defs, fixtures). Returns blocks ready "
+                "to drop into the SDK `system` array with cache_control: ephemeral on "
+                "blocks that meet the model's minimum cacheable size. Lossless — beats "
+                "any compression on bytes that recur every turn (75-90% off cached tokens)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blocks": {
+                        "type": "array",
+                        "description": "List of {name, text, stable} objects in send order. stable=true (default) makes the block eligible for caching.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "text": {"type": "string"},
+                                "stable": {"type": "boolean", "default": True},
+                            },
+                            "required": ["text"],
+                        },
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Target model id (claude-sonnet-4-6, claude-opus-4-7, claude-haiku-4-5). Used to pick the per-model min cacheable token threshold.",
+                        "default": "claude-sonnet-4-6",
+                    },
+                    "max_breakpoints": {
+                        "type": "integer",
+                        "description": "Max number of cache_control breakpoints to use (Anthropic limit is 4).",
+                        "default": 4,
+                    },
+                },
+                "required": ["blocks"],
+            },
+        ),
+        Tool(
+            name="chimera_log_compress",
+            description=(
+                "Compress build/test/install logs while preserving every error, warning, "
+                "and traceback line verbatim. Keeps head + tail windows for context. "
+                "Typical reduction 80-95% on noisy logs with zero loss of diagnostic signal."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Raw log output."},
+                    "keep_patterns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Case-insensitive substrings; lines containing any of these are kept verbatim. Defaults to error/warn/fail/exception/traceback patterns.",
+                    },
+                    "head_lines": {"type": "integer", "default": 50},
+                    "tail_lines": {"type": "integer", "default": 100},
+                    "context_lines": {
+                        "type": "integer",
+                        "default": 2,
+                        "description": "Number of lines to keep on each side of every matched line.",
+                    },
+                    "auto_track": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Record token savings to chimera_dashboard.",
+                    },
+                    "model": {
+                        "type": "string",
+                        "default": "claude-sonnet-4-6",
+                    },
+                    "namespace": {"type": "string", "default": "default"},
+                },
+                "required": ["text"],
+            },
+        ),
+        Tool(
+            name="chimera_overhead_audit",
+            description=(
+                "Estimate per-turn baseline cost (system prompt + tool definitions + MCP "
+                "server registrations). Surfaces the 'ghost tokens' the model pays on "
+                "every turn so you can prune unused MCP servers or trim verbose tool defs."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "system_prompt": {"type": "string"},
+                    "tool_definitions": {
+                        "type": "array",
+                        "description": "List of {name, description, schema}.",
+                        "items": {"type": "object"},
+                    },
+                    "mcp_servers": {
+                        "type": "array",
+                        "description": "List of {name, tool_count, avg_tokens_per_tool} for rough server-level cost.",
+                        "items": {"type": "object"},
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="chimera_dedup_lookup",
+            description=(
+                "Inspect or query the per-namespace tool-call dedup cache. Use action='get' "
+                "with key (sha256 prefix) to retrieve a prior call's metadata, action='list' "
+                "to see all tracked calls, action='clear' to reset. Populated automatically "
+                "by the PostToolUse hook."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["get", "list", "clear"],
+                        "default": "list",
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "16-char hex key (required for action=get).",
+                    },
+                    "tool_name": {
+                        "type": "string",
+                        "description": "Optional filter for action=list.",
+                    },
+                    "namespace": {"type": "string", "default": "default"},
+                },
+            },
+        ),
+        Tool(
+            name="chimera_session_report",
+            description=(
+                "End-of-session summary: total tokens saved, dedup cache hits, top "
+                "compressed responses, lock state. Safe to call any time; the Stop hook "
+                "calls it automatically when the agent stops responding."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "namespace": {"type": "string", "default": "default"},
+                    "include_dedup": {"type": "boolean", "default": True},
+                },
+            },
+        ),
     ]
 
 
@@ -2371,6 +2966,10 @@ async def list_tools() -> list[Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
+    _ns_for_advisory = (
+        _state_namespace(arguments) if isinstance(arguments, dict) else "default"
+    )
+    _ctx_token = _call_context.set((name, _ns_for_advisory))
     try:
 
         # ── chimera_run ───────────────────────────────────────────────────
@@ -4588,11 +5187,121 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                                             "savings_usd": summ_track["savings"]}
             return _ok(summ_payload)
 
+        # ── chimera_cache_mark ────────────────────────────────────────────
+        elif name == "chimera_cache_mark":
+            blocks = arguments.get("blocks") or []
+            if not isinstance(blocks, list) or not blocks:
+                return _err("chimera_cache_mark: 'blocks' must be a non-empty list")
+            model = str(arguments.get("model") or "claude-sonnet-4-6")
+            max_bp = int(arguments.get("max_breakpoints") or _CACHE_MAX_BREAKPOINTS)
+            return _ok(_build_cache_blocks(blocks, model=model, max_breakpoints=max_bp))
+
+        # ── chimera_log_compress ──────────────────────────────────────────
+        elif name == "chimera_log_compress":
+            text = arguments["text"]
+            keep_patterns = arguments.get("keep_patterns")
+            head = int(arguments.get("head_lines", 50))
+            tail = int(arguments.get("tail_lines", 100))
+            ctx_lines = int(arguments.get("context_lines", 2))
+            namespace = _state_namespace(arguments)
+            auto_track = bool(arguments.get("auto_track", True))
+            track_model = str(arguments.get("model") or "claude-sonnet-4-6")
+            payload = _compress_log(
+                text,
+                keep_patterns=keep_patterns,
+                head_lines=head,
+                tail_lines=tail,
+                context_lines=ctx_lines,
+            )
+            tokens_before = _tbm.count_tokens(text)
+            tokens_after = _tbm.count_tokens(payload["compressed_text"])
+            payload["estimated_tokens_before"] = tokens_before
+            payload["estimated_tokens_after"] = tokens_after
+            payload["estimated_tokens_saved"] = max(0, tokens_before - tokens_after)
+            if auto_track and tokens_before > tokens_after:
+                tracked = _get_cost_tracker(namespace).record(
+                    tokens_before=tokens_before,
+                    tokens_after=tokens_after,
+                    model=track_model,
+                    label="chimera_log_compress",
+                )
+                payload["tracked"] = {
+                    "request_id": tracked["request_id"],
+                    "savings_usd": tracked["savings"],
+                }
+            return _ok(payload)
+
+        # ── chimera_overhead_audit ────────────────────────────────────────
+        elif name == "chimera_overhead_audit":
+            return _ok(_audit_overhead(
+                system_prompt=arguments.get("system_prompt"),
+                tool_definitions=arguments.get("tool_definitions") or [],
+                mcp_servers=arguments.get("mcp_servers") or [],
+            ))
+
+        # ── chimera_dedup_lookup ──────────────────────────────────────────
+        elif name == "chimera_dedup_lookup":
+            namespace = _state_namespace(arguments)
+            action = str(arguments.get("action") or "list")
+            if action == "get":
+                key = str(arguments.get("key") or "").strip()
+                if not key:
+                    return _err("chimera_dedup_lookup: action=get requires 'key'")
+                entry = _dedup_lookup(namespace, key)
+                return _ok({"found": entry is not None, "entry": entry})
+            if action == "clear":
+                cleared = _dedup_clear(namespace)
+                return _ok({"cleared_entries": cleared, "namespace": namespace})
+            entries = _dedup_load(namespace)
+            tool_filter = arguments.get("tool_name")
+            if tool_filter:
+                entries = [e for e in entries if e.get("tool_name") == tool_filter]
+            return _ok({
+                "namespace": namespace,
+                "entry_count": len(entries),
+                "total_hits": sum(int(e.get("hit_count") or 0) for e in entries),
+                "entries": entries,
+            })
+
+        # ── chimera_session_report ────────────────────────────────────────
+        elif name == "chimera_session_report":
+            namespace = _state_namespace(arguments)
+            include_dedup = bool(arguments.get("include_dedup", True))
+            cost = _get_cost_tracker(namespace).summary()
+            budget = _budget_snapshot("chimera_session_report", namespace)
+            report: dict[str, Any] = {
+                "namespace": namespace,
+                "cost_summary": cost,
+                "budget": budget,
+            }
+            if include_dedup:
+                entries = _dedup_load(namespace)
+                top = sorted(
+                    entries,
+                    key=lambda e: int(e.get("hit_count") or 0),
+                    reverse=True,
+                )[:10]
+                report["dedup"] = {
+                    "tracked_calls": len(entries),
+                    "total_hits": sum(int(e.get("hit_count") or 0) for e in entries),
+                    "top_repeated": [
+                        {
+                            "tool_name": e.get("tool_name"),
+                            "hit_count": e.get("hit_count"),
+                            "response_chars": e.get("response_chars"),
+                        }
+                        for e in top
+                    ],
+                }
+            return _ok(report)
+
         else:
             return _err(f"Unknown tool: {name}")
 
     except Exception as e:
         return _err(f"{type(e).__name__}: {e}")
+    finally:
+        _call_context.reset(_ctx_token)
 
 
 # ── entrypoint ────────────────────────────────────────────────────────────
