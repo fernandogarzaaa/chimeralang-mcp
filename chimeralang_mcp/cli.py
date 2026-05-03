@@ -10,6 +10,7 @@ from chimeralang_mcp.materials.cli import run_materials_cli
 from chimeralang_mcp.server import main as run_stdio_server
 
 HOOK_PROMPT_THRESHOLD = 800
+HOOK_TOOL_RESPONSE_THRESHOLD = 2000
 HOOK_NAMESPACE = "claude-code-hook"
 SESSION_POLICY = (
     "Token-saving policy active for this session. Before processing any document, "
@@ -94,11 +95,42 @@ def _hook_session_start() -> int:
     return 0
 
 
+def _hook_post_tool_use() -> int:
+    event = _read_hook_event()
+    tool_name = str(event.get("tool_name") or "")
+    if not tool_name or tool_name.startswith("chimera_") or "chimeralang" in tool_name:
+        # Chimera tools already carry _chimera_session_budget inline.
+        return 0
+    response = (
+        event.get("tool_response")
+        or event.get("response")
+        or event.get("output")
+        or event.get("result")
+    )
+    try:
+        response_text = response if isinstance(response, str) else json.dumps(response)
+    except Exception:
+        response_text = str(response or "")
+    size = len(response_text)
+    if size < HOOK_TOOL_RESPONSE_THRESHOLD:
+        return 0
+    advisory = (
+        "[chimera-token-saver] Tool '{tool}' returned ~{size} chars (~{tok} tokens). "
+        "Before quoting it back at length, run chimera_optimize on the long excerpts "
+        "(preserve_code=true keeps fenced blocks intact). Check chimera_budget if "
+        "you're approaching the context window."
+    ).format(tool=tool_name, size=size, tok=max(1, size // 4))
+    _hook_emit("PostToolUse", advisory)
+    return 0
+
+
 def _run_hook(event: str) -> int:
     if event == "user-prompt":
         return _hook_user_prompt()
     if event == "session-start":
         return _hook_session_start()
+    if event == "post-tool-use":
+        return _hook_post_tool_use()
     sys.stderr.write(f"chimeralang hook: unknown event '{event}'\n")
     return 2
 
@@ -190,7 +222,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     hook_parser.add_argument(
         "--event",
-        choices=["user-prompt", "session-start"],
+        choices=["user-prompt", "session-start", "post-tool-use"],
         required=True,
     )
 

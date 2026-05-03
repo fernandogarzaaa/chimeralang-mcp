@@ -23,6 +23,16 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m chimeralang_mcp.cli hook --event post-tool-use"
+          }
+        ]
+      }
     ]
   }
 }

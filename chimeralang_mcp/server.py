@@ -17,6 +17,7 @@ Tools exposed to Claude:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import re
@@ -929,9 +930,161 @@ def _save_cost_tracker(namespace: str) -> str:
 
 # ── helpers ───────────────────────────────────────────────────────────────
 
+# Tools that already report budget/cost data inline — skip advisory injection
+# to avoid duplicate or recursive accounting.
+_BUDGET_NATIVE_TOOLS: frozenset[str] = frozenset({
+    "chimera_dashboard",
+    "chimera_budget",
+    "chimera_budget_lock",
+    "chimera_cost_track",
+    "chimera_cost_estimate",
+    "chimera_csm",
+})
+
+# Tools whose outputs are already deliberately compressed/raw — never
+# re-compress (would mangle the user-requested output and double-bill savings).
+_NO_AUTO_COMPRESS_TOOLS: frozenset[str] = _BUDGET_NATIVE_TOOLS | frozenset({
+    "chimera_compress",
+    "chimera_optimize",
+    "chimera_fracture",
+    "chimera_summarize",
+})
+
+# Field-level compression thresholds and exclusions.
+_RESPONSE_COMPRESS_THRESHOLD = 4000
+_FIELD_COMPRESS_MIN_CHARS = 1500
+_NEVER_COMPRESS_KEYS: frozenset[str] = frozenset({
+    "id", "request_id", "envelope_id", "tool_use_id", "session_id",
+    "hash", "hash_chain", "signature", "digest", "checksum",
+    "model", "namespace", "kind", "version", "envelope_version",
+    "pack_version", "path", "storage_path", "url", "uri",
+    "timestamp", "created_at", "locked_at",
+    "_chimera_session_budget", "_chimera_compressed_fields",
+})
+
+
+def _walk_compress(
+    node: Any,
+    path: list[str],
+    compressed: list[dict[str, Any]],
+) -> Any:
+    if isinstance(node, dict):
+        return {
+            key: (
+                value
+                if key in _NEVER_COMPRESS_KEYS
+                else _walk_compress(value, path + [str(key)], compressed)
+            )
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [_walk_compress(v, path + [str(i)], compressed) for i, v in enumerate(node)]
+    if isinstance(node, str) and len(node) >= _FIELD_COMPRESS_MIN_CHARS:
+        stripped = node.lstrip()
+        if not stripped or stripped[0] in '{[':
+            return node  # JSON-shaped — preserve structure
+        try:
+            result = _quantum.optimize_text(node, level="medium", preserve_code=True)
+        except Exception:
+            return node
+        if result.compressed_chars < len(node):
+            compressed.append({
+                "path": ".".join(path) or "<root>",
+                "original_chars": result.original_chars,
+                "compressed_chars": result.compressed_chars,
+                "tokens_saved": result.original_tokens - result.compressed_tokens,
+            })
+            return result.text
+    return node
+
+
+def _maybe_compress_oversized(
+    tool_name: str,
+    data: dict[str, Any],
+    rendered_size: int,
+) -> dict[str, Any]:
+    if (
+        tool_name in _NO_AUTO_COMPRESS_TOOLS
+        or rendered_size < _RESPONSE_COMPRESS_THRESHOLD
+    ):
+        return data
+    compressed: list[dict[str, Any]] = []
+    walked = _walk_compress(data, [], compressed)
+    if not compressed:
+        return data
+    walked["_chimera_compressed_fields"] = compressed
+    return walked
+
+# Per-call context: (tool_name, namespace). Populated in call_tool, read in _ok.
+_call_context: contextvars.ContextVar[tuple[str, str] | None] = contextvars.ContextVar(
+    "chimera_call_context", default=None
+)
+
+
+def _budget_snapshot(tool_name: str, namespace: str) -> dict[str, Any]:
+    """Cheap snapshot of session token budget — never raises."""
+    try:
+        summary = _get_cost_tracker(namespace).summary()
+    except Exception:
+        summary = {"request_count": 0, "total_tokens_saved": 0, "avg_pct_saved": 0.0}
+    lock = _session_budget
+    locked = bool(lock.get("locked"))
+    max_tokens = lock.get("max_output_tokens")
+    generated = int(lock.get("tokens_generated") or 0)
+    remaining: int | None
+    if locked and isinstance(max_tokens, int):
+        remaining = max(max_tokens - generated, 0)
+    else:
+        remaining = None
+    if locked and remaining is not None and max_tokens:
+        if remaining <= 0:
+            advisory = "lock_exhausted: refuse further generation or extend lock"
+        elif remaining < max_tokens * 0.1:
+            advisory = "lock_critical: <10% of locked budget remaining"
+        elif remaining < max_tokens * 0.3:
+            advisory = "lock_warn: <30% of locked budget remaining"
+        else:
+            advisory = "lock_ok"
+    elif locked:
+        advisory = "lock_active_but_unbounded"
+    else:
+        advisory = "no_lock_set: call chimera_budget_lock to enforce a per-session cap"
+    return {
+        "tool": tool_name,
+        "namespace": namespace,
+        "lock_active": locked,
+        "lock_max_output_tokens": max_tokens,
+        "lock_tokens_generated": generated,
+        "lock_tokens_remaining": remaining,
+        "session_requests_tracked": summary.get("request_count", 0),
+        "session_tokens_saved": summary.get("total_tokens_saved", 0),
+        "session_avg_pct_saved": summary.get("avg_pct_saved", 0.0),
+        "advisory": advisory,
+    }
+
+
 def _ok(data: Any) -> CallToolResult:
+    ctx = _call_context.get()
+    if (
+        ctx is not None
+        and isinstance(data, dict)
+        and ctx[0] not in _BUDGET_NATIVE_TOOLS
+        and "_chimera_session_budget" not in data
+    ):
+        try:
+            data = {**data, "_chimera_session_budget": _budget_snapshot(*ctx)}
+        except Exception:
+            pass  # advisory must never break a tool call
+    rendered = json.dumps(data, indent=2)
+    if ctx is not None and isinstance(data, dict):
+        try:
+            recompressed = _maybe_compress_oversized(ctx[0], data, len(rendered))
+        except Exception:
+            recompressed = data
+        if recompressed is not data:
+            rendered = json.dumps(recompressed, indent=2)
     return CallToolResult(
-        content=[TextContent(type="text", text=json.dumps(data, indent=2))],
+        content=[TextContent(type="text", text=rendered)],
         isError=False,
     )
 
@@ -2381,6 +2534,10 @@ async def list_tools() -> list[Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
+    _ns_for_advisory = (
+        _state_namespace(arguments) if isinstance(arguments, dict) else "default"
+    )
+    _ctx_token = _call_context.set((name, _ns_for_advisory))
     try:
 
         # ── chimera_run ───────────────────────────────────────────────────
@@ -4603,6 +4760,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
     except Exception as e:
         return _err(f"{type(e).__name__}: {e}")
+    finally:
+        _call_context.reset(_ctx_token)
 
 
 # ── entrypoint ────────────────────────────────────────────────────────────
