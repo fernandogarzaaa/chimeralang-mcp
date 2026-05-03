@@ -14,6 +14,20 @@ pip install chimeralang-mcp
 uvx chimeralang-mcp
 ```
 
+### Development quick checks
+
+```bash
+pytest -q
+python -m pip check
+```
+
+`pytest` is configured via `pyproject.toml` to include project root on `PYTHONPATH`.
+
+For token counting internals, these optional environment variables are supported:
+
+- `CHIMERA_TOKEN_CACHE_MAX_ENTRIES` (default `2048`) — bounds in-memory token count cache size.
+- `CHIMERA_TOKEN_FALLBACK_LOG_INTERVAL_S` (default `60`) — throttles repeated fallback warning logs.
+
 ---
 
 ## Claude Desktop Setup
