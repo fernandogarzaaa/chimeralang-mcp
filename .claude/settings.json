@@ -33,6 +33,26 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m chimeralang_mcp.cli hook --event pre-tool-use"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m chimeralang_mcp.cli hook --event stop"
+          }
+        ]
+      }
     ]
   }
 }

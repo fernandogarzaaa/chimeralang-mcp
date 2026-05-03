@@ -11,7 +11,11 @@ from chimeralang_mcp.server import main as run_stdio_server
 
 HOOK_PROMPT_THRESHOLD = 800
 HOOK_TOOL_RESPONSE_THRESHOLD = 2000
+HOOK_TOOL_INPUT_THRESHOLD = 4000
 HOOK_NAMESPACE = "claude-code-hook"
+HOOK_INPUT_HEAVY_TOOLS = frozenset({
+    "Edit", "MultiEdit", "Write", "NotebookEdit", "Bash",
+})
 SESSION_POLICY = (
     "Token-saving policy active for this session. Before processing any document, "
     "tool return, or conversation history >500 chars, route it through "
@@ -95,11 +99,34 @@ def _hook_session_start() -> int:
     return 0
 
 
+def _is_chimera_tool(tool_name: str) -> bool:
+    return tool_name.startswith("chimera_") or "chimeralang" in tool_name
+
+
+def _record_dedup_safely(tool_name: str, tool_input: Any, response_text: str) -> dict | None:
+    """Best-effort dedup record. Never raises into the hook."""
+    try:
+        from chimeralang_mcp import server as srv
+        return srv._dedup_record(HOOK_NAMESPACE, tool_name, tool_input, response_text)
+    except Exception as exc:  # pragma: no cover - hook must never break the session
+        sys.stderr.write(f"chimeralang hook: dedup_record failed: {exc}\n")
+        return None
+
+
+def _lookup_dedup_safely(tool_name: str, tool_input: Any) -> dict | None:
+    try:
+        from chimeralang_mcp import server as srv
+        key = srv._dedup_key(tool_name, tool_input)
+        return srv._dedup_lookup(HOOK_NAMESPACE, key)
+    except Exception as exc:  # pragma: no cover
+        sys.stderr.write(f"chimeralang hook: dedup_lookup failed: {exc}\n")
+        return None
+
+
 def _hook_post_tool_use() -> int:
     event = _read_hook_event()
     tool_name = str(event.get("tool_name") or "")
-    if not tool_name or tool_name.startswith("chimera_") or "chimeralang" in tool_name:
-        # Chimera tools already carry _chimera_session_budget inline.
+    if not tool_name:
         return 0
     response = (
         event.get("tool_response")
@@ -111,6 +138,12 @@ def _hook_post_tool_use() -> int:
         response_text = response if isinstance(response, str) else json.dumps(response)
     except Exception:
         response_text = str(response or "")
+    if _is_chimera_tool(tool_name):
+        # Chimera tools self-report budget inline; we still skip dedup-recording
+        # them to avoid recursive growth.
+        return 0
+    tool_input = event.get("tool_input") or event.get("input") or {}
+    _record_dedup_safely(tool_name, tool_input, response_text)
     size = len(response_text)
     if size < HOOK_TOOL_RESPONSE_THRESHOLD:
         return 0
@@ -124,6 +157,94 @@ def _hook_post_tool_use() -> int:
     return 0
 
 
+def _input_size(tool_input: Any) -> int:
+    if isinstance(tool_input, str):
+        return len(tool_input)
+    try:
+        return len(json.dumps(tool_input, default=str))
+    except Exception:
+        return len(str(tool_input))
+
+
+def _hook_pre_tool_use() -> int:
+    event = _read_hook_event()
+    tool_name = str(event.get("tool_name") or "")
+    if not tool_name or _is_chimera_tool(tool_name):
+        return 0
+    tool_input = event.get("tool_input") or event.get("input") or {}
+    notes: list[str] = []
+
+    # 1. Dedup hit — same tool + same args as a prior call this session.
+    prior = _lookup_dedup_safely(tool_name, tool_input)
+    if prior and int(prior.get("hit_count") or 0) >= 0 and prior.get("response_chars"):
+        notes.append(
+            "[chimera-token-saver] '{tool}' was already called with these exact args "
+            "(dedup key={key}, response was ~{rc} chars, prior hits={hits}). "
+            "Consider chimera_dedup_lookup with action=get,key={key} to confirm "
+            "before re-running.".format(
+                tool=tool_name,
+                key=prior.get("key"),
+                rc=prior.get("response_chars"),
+                hits=prior.get("hit_count"),
+            )
+        )
+
+    # 2. Oversized input payload — Edit/Write/Bash with huge bodies.
+    if tool_name in HOOK_INPUT_HEAVY_TOOLS:
+        size = _input_size(tool_input)
+        if size >= HOOK_TOOL_INPUT_THRESHOLD:
+            notes.append(
+                "[chimera-token-saver] '{tool}' input is ~{size} chars (~{tok} tokens). "
+                "If this is mostly natural-language prose or quoted output, consider "
+                "running chimera_optimize on the body first (preserve_code=true keeps "
+                "code intact). Code-only payloads are usually fine.".format(
+                    tool=tool_name, size=size, tok=max(1, size // 4),
+                )
+            )
+
+    if notes:
+        _hook_emit("PreToolUse", "\n\n".join(notes))
+    return 0
+
+
+def _hook_stop() -> int:
+    _read_hook_event()
+    try:
+        from chimeralang_mcp import server as srv
+
+        async def _run() -> dict:
+            result = await srv.call_tool(
+                "chimera_session_report",
+                {"namespace": HOOK_NAMESPACE, "include_dedup": True},
+            )
+            for item in result.content:
+                payload = getattr(item, "text", None)
+                if payload:
+                    return json.loads(payload)
+            return {}
+
+        report = asyncio.run(_run())
+    except Exception as exc:  # pragma: no cover
+        sys.stderr.write(f"chimeralang hook: session_report failed: {exc}\n")
+        return 0
+    cost = report.get("cost_summary") or {}
+    dedup = report.get("dedup") or {}
+    saved = cost.get("total_tokens_saved") or 0
+    requests = cost.get("request_count") or 0
+    pct = cost.get("avg_pct_saved") or 0.0
+    tracked_calls = dedup.get("tracked_calls") or 0
+    total_hits = dedup.get("total_hits") or 0
+    if saved <= 0 and tracked_calls == 0:
+        return 0
+    summary = (
+        "[chimera-token-saver] Session totals — compression: ~{saved} tokens saved "
+        "across {req} request(s), avg {pct}%. Dedup: {calls} unique tool calls "
+        "tracked, {hits} repeat hit(s). Use chimera_session_report for details."
+    ).format(saved=saved, req=requests, pct=pct, calls=tracked_calls, hits=total_hits)
+    _hook_emit("Stop", summary)
+    return 0
+
+
 def _run_hook(event: str) -> int:
     if event == "user-prompt":
         return _hook_user_prompt()
@@ -131,6 +252,10 @@ def _run_hook(event: str) -> int:
         return _hook_session_start()
     if event == "post-tool-use":
         return _hook_post_tool_use()
+    if event == "pre-tool-use":
+        return _hook_pre_tool_use()
+    if event == "stop":
+        return _hook_stop()
     sys.stderr.write(f"chimeralang hook: unknown event '{event}'\n")
     return 2
 
@@ -222,7 +347,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     hook_parser.add_argument(
         "--event",
-        choices=["user-prompt", "session-start", "post-tool-use"],
+        choices=["user-prompt", "session-start", "post-tool-use", "pre-tool-use", "stop"],
         required=True,
     )
 
