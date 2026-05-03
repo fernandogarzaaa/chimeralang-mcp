@@ -1031,6 +1031,14 @@ _DEDUP_MAX_ENTRIES = 256
 _DEDUP_PREVIEW_CHARS = 200
 
 
+def _dedup_store_previews() -> bool:
+    """Previews include raw tool input/output substrings — for Read/Bash/Write
+    that can be sensitive (file contents, command output, secrets). Default
+    OFF; opt in via CHIMERA_DEDUP_STORE_PREVIEWS=1."""
+    import os
+    return os.environ.get("CHIMERA_DEDUP_STORE_PREVIEWS", "0").lower() in ("1", "true", "yes")
+
+
 def _dedup_key(tool_name: str, tool_input: Any) -> str:
     try:
         canonical = json.dumps(tool_input, sort_keys=True, ensure_ascii=True, default=str)
@@ -1061,33 +1069,42 @@ def _dedup_record(
     entries = _dedup_load(namespace)
     now = time.time()
     response_hash = _hashlib.sha256(response_text.encode("utf-8", "replace")).hexdigest()[:16]
-    for entry in entries:
+    store_previews = _dedup_store_previews()
+    for idx, entry in enumerate(entries):
         if entry.get("key") == key:
             entry["hit_count"] = int(entry.get("hit_count") or 0) + 1
             entry["last_seen"] = now
             entry["response_chars"] = len(response_text)
-            entry["response_preview"] = response_text[:_DEDUP_PREVIEW_CHARS]
             entry["response_hash"] = response_hash
+            if store_previews:
+                entry["response_preview"] = response_text[:_DEDUP_PREVIEW_CHARS]
+            else:
+                entry.pop("response_preview", None)
+            # LRU: move hit entry to the end so frequently-used entries
+            # survive the trim window.
+            if idx != len(entries) - 1:
+                entries.append(entries.pop(idx))
             _store.save(_DEDUP_KIND, namespace, entries)
             return entry
-    if isinstance(tool_input, str):
-        input_preview = tool_input[:_DEDUP_PREVIEW_CHARS]
-    else:
-        try:
-            input_preview = json.dumps(tool_input, default=str)[:_DEDUP_PREVIEW_CHARS]
-        except Exception:
-            input_preview = str(tool_input)[:_DEDUP_PREVIEW_CHARS]
     entry = {
         "key": key,
         "tool_name": tool_name,
-        "tool_input_preview": input_preview,
         "response_chars": len(response_text),
-        "response_preview": response_text[:_DEDUP_PREVIEW_CHARS],
         "response_hash": response_hash,
         "first_seen": now,
         "last_seen": now,
         "hit_count": 0,
     }
+    if store_previews:
+        if isinstance(tool_input, str):
+            input_preview = tool_input[:_DEDUP_PREVIEW_CHARS]
+        else:
+            try:
+                input_preview = json.dumps(tool_input, default=str)[:_DEDUP_PREVIEW_CHARS]
+            except Exception:
+                input_preview = str(tool_input)[:_DEDUP_PREVIEW_CHARS]
+        entry["tool_input_preview"] = input_preview
+        entry["response_preview"] = response_text[:_DEDUP_PREVIEW_CHARS]
     entries.append(entry)
     if len(entries) > _DEDUP_MAX_ENTRIES:
         entries = entries[-_DEDUP_MAX_ENTRIES:]
@@ -1146,15 +1163,17 @@ def _compress_log(
     if skipped_run:
         out_lines.append(f"[... {skipped_run} line(s) abridged ...]")
     compressed = "\n".join(out_lines)
+    raw_ratio = 1 - len(compressed) / max(len(text), 1)
     return {
         "compressed_text": compressed,
         "lines_in": n,
-        "lines_out": sum(keep),
+        "lines_out": len(out_lines),
+        "lines_kept_verbatim": sum(keep),
         "matches_kept": matches,
         "original_chars": len(text),
         "compressed_chars": len(compressed),
         "chars_saved": max(0, len(text) - len(compressed)),
-        "reduction_ratio": round(1 - len(compressed) / max(len(text), 1), 4),
+        "reduction_ratio": round(max(0.0, min(1.0, raw_ratio)), 4),
     }
 
 

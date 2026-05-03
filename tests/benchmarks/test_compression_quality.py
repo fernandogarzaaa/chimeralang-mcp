@@ -10,10 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from pathlib import Path
-
-import pytest
 
 from chimeralang_mcp import server as srv
 

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "chimeralang-mcp"
 version = "0.6.1"
-description = "ChimeraLang MCP Server â€” probabilistic types, consensus gates, and hallucination detection as Claude tools"
+description = "ChimeraLang MCP Server — probabilistic types, consensus gates, and hallucination detection as Claude tools"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"

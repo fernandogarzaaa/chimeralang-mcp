@@ -10,8 +10,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 from chimeralang_mcp import server as srv
 
 
@@ -217,6 +215,56 @@ class TestDedupCache:
         k2 = srv._dedup_key("Bash", {"timeout": 5, "command": "ls"})
         assert k1 == k2
 
+    def test_previews_are_off_by_default(self, monkeypatch):
+        monkeypatch.delenv("CHIMERA_DEDUP_STORE_PREVIEWS", raising=False)
+        srv._dedup_record(self.NS, "Bash", {"command": "echo secret"}, "secret-output")
+        entry = srv._dedup_load(self.NS)[-1]
+        assert "tool_input_preview" not in entry
+        assert "response_preview" not in entry
+        # Hashes + lengths still present so dedup works.
+        assert entry["response_hash"]
+        assert entry["response_chars"] == len("secret-output")
+
+    def test_previews_opt_in_via_env(self, monkeypatch):
+        monkeypatch.setenv("CHIMERA_DEDUP_STORE_PREVIEWS", "1")
+        srv._dedup_record(self.NS, "Bash", {"command": "echo hello"}, "hello")
+        entry = srv._dedup_load(self.NS)[-1]
+        assert entry["response_preview"] == "hello"
+        assert "echo hello" in entry["tool_input_preview"]
+
+    def test_lru_moves_hit_entry_to_end(self, monkeypatch):
+        monkeypatch.delenv("CHIMERA_DEDUP_STORE_PREVIEWS", raising=False)
+        srv._dedup_record(self.NS, "Read", {"file_path": "/a"}, "A")
+        srv._dedup_record(self.NS, "Read", {"file_path": "/b"}, "B")
+        srv._dedup_record(self.NS, "Read", {"file_path": "/c"}, "C")
+        # Hit /a — it should move to the end.
+        srv._dedup_record(self.NS, "Read", {"file_path": "/a"}, "A")
+        entries = srv._dedup_load(self.NS)
+        assert entries[-1]["key"] == srv._dedup_key("Read", {"file_path": "/a"})
+        assert entries[-1]["hit_count"] == 1
+
+
+class TestLogCompressCorrectness:
+    """Regressions for two Copilot review findings."""
+
+    def test_lines_out_includes_abridgement_markers(self):
+        text = "\n".join(["INFO {}".format(i) for i in range(200)] + ["ERROR boom"])
+        result = _call("chimera_log_compress", {
+            "text": text, "namespace": "log-fix", "head_lines": 2, "tail_lines": 2,
+        })
+        emitted = result["compressed_text"].count("\n") + 1
+        assert result["lines_out"] == emitted
+        assert result["lines_kept_verbatim"] <= result["lines_out"]
+
+    def test_reduction_ratio_clamped_to_unit_interval(self):
+        # Very short input where the abridgement marker can outweigh savings.
+        result = _call("chimera_log_compress", {
+            "text": "ERROR boom\nINFO ok",
+            "namespace": "log-fix",
+            "head_lines": 0, "tail_lines": 0,
+        })
+        assert 0.0 <= result["reduction_ratio"] <= 1.0
+
 
 # ── chimera_session_report ────────────────────────────────────────────────
 
@@ -333,11 +381,11 @@ class TestPostToolUseRecordsDedup:
             "tool_input": {"file_path": "/post-records-test"},
             "tool_response": "hello",
         }))
-        # dedup cache is on disk; reload
+        expected_key = srv._dedup_key("Read", {"file_path": "/post-records-test"})
         entries = srv._dedup_load("claude-code-hook")
+        # Match by key (previews are off by default for privacy).
         assert any(
-            e.get("tool_name") == "Read"
-            and "/post-records-test" in (e.get("tool_input_preview") or "")
+            e.get("tool_name") == "Read" and e.get("key") == expected_key
             for e in entries
         )
 
