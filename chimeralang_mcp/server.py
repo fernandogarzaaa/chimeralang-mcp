@@ -1144,6 +1144,19 @@ def _verify_claims_against_evidence(
     registry = _get_materials()
     evidence_texts = [_evidence_text(item) for item in evidence]
     evidence_blob = "\n".join(evidence_texts).lower()
+    evidence_lower = [text.lower() for text in evidence_texts]
+    evidence_tokens = [_tokenize_for_match(text) for text in evidence_texts]
+    evidence_attacks = [registry.find_attack_matches(text) for text in evidence_texts]
+    gold_index: dict[str, tuple[dict[str, Any], list[set[str]]]] = {}
+    for record in registry.pack("verification_gold"):
+        key = str(record.get("claim", "")).strip().lower()
+        if not key or key in gold_index:
+            continue
+        exemplar_tokens = [
+            _tokenize_for_match(str(exemplar))
+            for exemplar in record.get("evidence", [])
+        ]
+        gold_index[key] = (record, exemplar_tokens)
     verified_claims: list[dict[str, Any]] = []
     unsupported_claims: list[dict[str, Any]] = []
     contradicted_claims: list[dict[str, Any]] = []
@@ -1156,14 +1169,11 @@ def _verify_claims_against_evidence(
         if not claim_text:
             continue
         claim_tokens = _tokenize_for_match(claim_text)
-        gold_record = next(
-            (
-                record
-                for record in registry.pack("verification_gold")
-                if str(record.get("claim", "")).strip().lower() == claim_text.lower()
-            ),
-            None,
-        )
+        claim_lower = claim_text.lower()
+        claim_token_count = max(len(claim_tokens), 1)
+        gold_pair = gold_index.get(claim_lower)
+        gold_record, gold_exemplars = gold_pair if gold_pair else (None, [])
+        gold_verdict = str(gold_record.get("verdict", "")) if gold_record else ""
         support_score = 0.0
         contradiction_score = 0.0
         best_match: dict[str, Any] | None = None
@@ -1171,28 +1181,28 @@ def _verify_claims_against_evidence(
         claim_attack_flags: list[dict[str, Any]] = []
 
         for idx, evidence_text in enumerate(evidence_texts):
-            normalized = evidence_text.lower()
-            overlap = claim_tokens.intersection(_tokenize_for_match(normalized))
-            score = len(overlap) / max(len(claim_tokens), 1)
-            if claim_text.lower() in normalized:
+            normalized = evidence_lower[idx]
+            ev_tokens = evidence_tokens[idx]
+            overlap = claim_tokens.intersection(ev_tokens)
+            score = len(overlap) / claim_token_count
+            if claim_lower in normalized:
                 score = max(score, 1.0)
             if gold_record:
-                exemplar_scores = []
-                for exemplar in gold_record.get("evidence", []):
-                    exemplar_tokens = _tokenize_for_match(str(exemplar))
-                    exemplar_scores.append(
-                        len(exemplar_tokens.intersection(_tokenize_for_match(evidence_text))) / max(len(exemplar_tokens), 1)
-                    )
-                exemplar_score = max(exemplar_scores or [0.0])
+                exemplar_score = 0.0
+                for exemplar_tokens in gold_exemplars:
+                    if not exemplar_tokens:
+                        continue
+                    s = len(exemplar_tokens.intersection(ev_tokens)) / len(exemplar_tokens)
+                    if s > exemplar_score:
+                        exemplar_score = s
                 if exemplar_score >= 0.45:
-                    gold_verdict = str(gold_record.get("verdict", ""))
                     if gold_verdict == "supported":
                         score = max(score, 0.92)
                     elif gold_verdict == "contradicted":
                         contradiction_score = max(contradiction_score, 0.9)
                     elif gold_verdict == "insufficient_evidence":
                         score = min(score, 0.35)
-            attack_flags = registry.find_attack_matches(evidence_text)
+            attack_flags = evidence_attacks[idx]
             if attack_flags:
                 claim_attack_flags.extend(attack_flags)
                 aggregate_attack_flags.extend(attack_flags)

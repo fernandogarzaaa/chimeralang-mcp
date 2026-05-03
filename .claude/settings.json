@@ -6,6 +6,20 @@
           {
             "type": "command",
             "command": "pip install -e . -q 2>/dev/null || true"
+          },
+          {
+            "type": "command",
+            "command": "python -m chimeralang_mcp.cli hook --event session-start"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m chimeralang_mcp.cli hook --event user-prompt"
           }
         ]
       }

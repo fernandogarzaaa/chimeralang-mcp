@@ -2,11 +2,105 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
-from typing import Sequence
+from typing import Any, Sequence
 
 from chimeralang_mcp.materials.cli import run_materials_cli
 from chimeralang_mcp.server import main as run_stdio_server
+
+HOOK_PROMPT_THRESHOLD = 800
+HOOK_NAMESPACE = "claude-code-hook"
+SESSION_POLICY = (
+    "Token-saving policy active for this session. Before processing any document, "
+    "tool return, or conversation history >500 chars, route it through "
+    "chimera_fracture (preferred) or chimera_optimize. Use chimera_budget to monitor "
+    "context window usage and chimera_cost_track to log savings. Quantum compression "
+    "targets 2-5% of original size while preserving entities and structure."
+)
+
+
+def _hook_emit(event: str, additional_context: str | None) -> None:
+    if not additional_context:
+        return
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": event,
+            "additionalContext": additional_context,
+        }
+    }
+    json.dump(payload, sys.stdout)
+
+
+def _read_hook_event() -> dict[str, Any]:
+    raw = sys.stdin.read().strip()
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {"prompt": raw}
+
+
+def _call_optimize_sync(text: str) -> dict[str, Any]:
+    from chimeralang_mcp import server as srv
+
+    async def _run() -> dict[str, Any]:
+        result = await srv.call_tool(
+            "chimera_optimize",
+            {"text": text, "namespace": HOOK_NAMESPACE, "level": "medium"},
+        )
+        for item in result.content:
+            payload = getattr(item, "text", None)
+            if payload:
+                return json.loads(payload)
+        return {}
+
+    return asyncio.run(_run())
+
+
+def _hook_user_prompt() -> int:
+    event = _read_hook_event()
+    prompt = str(event.get("prompt", "") or "")
+    if len(prompt) < HOOK_PROMPT_THRESHOLD:
+        return 0
+    try:
+        payload = _call_optimize_sync(prompt)
+    except Exception as exc:  # pragma: no cover - hook must never break the session
+        sys.stderr.write(f"chimeralang hook: optimize failed: {exc}\n")
+        return 0
+    compressed = payload.get("optimised_text") or ""
+    saved = payload.get("estimated_tokens_saved") or 0
+    if not compressed or saved <= 0:
+        return 0
+    summary = (
+        "[chimera-token-saver] Prompt was {orig} chars / ~{orig_tok} tokens. "
+        "Compressed (ratio={ratio}, saved ~{saved} tokens) — refer to this "
+        "condensed form when quoting the prompt back:\n{body}"
+    ).format(
+        orig=payload.get("original_chars", len(prompt)),
+        orig_tok=payload.get("estimated_tokens_before", "?"),
+        ratio=payload.get("reduction_ratio", "?"),
+        saved=saved,
+        body=compressed,
+    )
+    _hook_emit("UserPromptSubmit", summary)
+    return 0
+
+
+def _hook_session_start() -> int:
+    _read_hook_event()
+    _hook_emit("SessionStart", SESSION_POLICY)
+    return 0
+
+
+def _run_hook(event: str) -> int:
+    if event == "user-prompt":
+        return _hook_user_prompt()
+    if event == "session-start":
+        return _hook_session_start()
+    sys.stderr.write(f"chimeralang hook: unknown event '{event}'\n")
+    return 2
 
 
 async def _run_http_server(host: str, port: int) -> None:
@@ -90,6 +184,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     server_parser.add_argument("--host", default="127.0.0.1")
     server_parser.add_argument("--port", type=int, default=8765)
 
+    hook_parser = subparsers.add_parser(
+        "hook",
+        help="Claude Code hook entry point (reads JSON event from stdin, emits hookSpecificOutput on stdout)",
+    )
+    hook_parser.add_argument(
+        "--event",
+        choices=["user-prompt", "session-start"],
+        required=True,
+    )
+
     parsed = parser.parse_args(args)
     if parsed.command == "server":
         if parsed.transport == "http":
@@ -97,6 +201,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             run_stdio_server()
         return 0
+    if parsed.command == "hook":
+        return _run_hook(parsed.event)
 
     parser.print_help()
     return 1
