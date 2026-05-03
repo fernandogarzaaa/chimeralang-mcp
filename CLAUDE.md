@@ -17,7 +17,22 @@ Before processing large documents, conversation histories, or code blobs, always
 | Single large doc/code blob | `chimera_optimize` |
 | Long conversation history | `chimera_compress` |
 | Both docs + messages | `chimera_fracture` |
+| Build/test/install logs | `chimera_log_compress` (errors verbatim, body abridged) |
+| Stable system blocks for an Anthropic SDK call | `chimera_cache_mark` (lossless 75–90% off via prompt cache) |
+| Recurring per-turn cost surfacing | `chimera_overhead_audit` |
+| Inspect repeated tool calls | `chimera_dedup_lookup` |
+| End-of-session totals | `chimera_session_report` |
 | Quick inline text (< 200 chars) | skip |
+
+### Hook coverage
+
+The token tools fire automatically via `.claude/settings.json`:
+
+- **SessionStart** — emits the policy above as `additionalContext`.
+- **UserPromptSubmit** — auto-compresses prompts > 800 chars.
+- **PreToolUse** — warns on duplicate tool calls (dedup hit) and on `Edit`/`Write`/`Bash` payloads > 4000 chars.
+- **PostToolUse** — records every non-chimera tool call into the dedup cache and nudges when responses > 2000 chars.
+- **Stop** — emits a session totals summary (tokens saved, dedup hits) when the agent stops responding.
 
 ---
 

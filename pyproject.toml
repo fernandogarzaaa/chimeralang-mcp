@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chimeralang-mcp"
-version = "0.2.7"
-description = "ChimeraLang MCP Server â€” probabilistic types, consensus gates, and hallucination detection as Claude tools"
+version = "0.6.1"
+description = "ChimeraLang MCP Server — probabilistic types, consensus gates, and hallucination detection as Claude tools"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
@@ -22,8 +22,14 @@ classifiers = [
 ]
 dependencies = ["mcp>=1.0.0"]
 
+[project.optional-dependencies]
+sync = ["datasets>=2.20.0", "huggingface_hub>=0.23.0"]
+eval = ["pytest>=8.0.0"]
+conformance = ["uvicorn>=0.30.0", "starlette>=0.37.0"]
+dev = ["build>=1.2.1", "pytest>=8.0.0", "uvicorn>=0.30.0", "starlette>=0.37.0"]
+
 [project.scripts]
-chimeralang-mcp = "chimeralang_mcp.server:main"
+chimeralang-mcp = "chimeralang_mcp.cli:main"
 
 [project.urls]
 Homepage   = "https://github.com/fernandogarzaaa/chimeralang-mcp"

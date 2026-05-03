@@ -1,5 +1,7 @@
-"""Entry point: python -m chimeralang_mcp"""
-import asyncio
-from chimeralang_mcp.server import main
+"""Entry point: python -m chimeralang_mcp."""
 
-asyncio.run(main())
+from chimeralang_mcp.cli import main
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
