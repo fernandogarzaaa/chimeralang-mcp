@@ -324,8 +324,8 @@ class TestPreToolUseHook:
         assert proc.stdout.strip() == ""
 
     def test_dedup_hit_emits_advisory(self):
-        srv._dedup_clear("claude-code-hook")
-        srv._dedup_record("claude-code-hook", "Read", {"file_path": "/dedup-pre"}, "body")
+        srv._dedup_clear("claude-code-hook:default")
+        srv._dedup_record("claude-code-hook:default", "Read", {"file_path": "/dedup-pre"}, "body")
         proc = self._run(json.dumps({
             "tool_name": "Read",
             "tool_input": {"file_path": "/dedup-pre"},
@@ -352,15 +352,15 @@ class TestStopHook:
         )
 
     def test_stop_emits_summary_when_dedup_present(self):
-        srv._dedup_clear("claude-code-hook")
-        srv._dedup_record("claude-code-hook", "Read", {"file_path": "/stop-test"}, "body")
+        srv._dedup_clear("claude-code-hook:default")
+        srv._dedup_record("claude-code-hook:default", "Read", {"file_path": "/stop-test"}, "body")
         proc = self._run()
         assert proc.returncode == 0
         out = proc.stdout.strip()
-        if out:  # may be silent if both saved=0 and tracked=0 — depends on prior state
-            ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-            assert "Session totals" in ctx
-            assert "Dedup" in ctx
+        assert out, "stop hook should emit output when dedup entries are tracked"
+        ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        assert "Session totals" in ctx
+        assert "Dedup" in ctx
 
 
 # ── PostToolUse now records into dedup ─────────────────────────────────────
@@ -375,14 +375,14 @@ class TestPostToolUseRecordsDedup:
         )
 
     def test_post_tool_use_records_dedup_entry(self):
-        srv._dedup_clear("claude-code-hook")
+        srv._dedup_clear("claude-code-hook:default")
         self._run(json.dumps({
             "tool_name": "Read",
             "tool_input": {"file_path": "/post-records-test"},
             "tool_response": "hello",
         }))
         expected_key = srv._dedup_key("Read", {"file_path": "/post-records-test"})
-        entries = srv._dedup_load("claude-code-hook")
+        entries = srv._dedup_load("claude-code-hook:default")
         # Match by key (previews are off by default for privacy).
         assert any(
             e.get("tool_name") == "Read" and e.get("key") == expected_key
@@ -390,11 +390,11 @@ class TestPostToolUseRecordsDedup:
         )
 
     def test_chimera_tool_is_not_recorded(self):
-        srv._dedup_clear("claude-code-hook")
+        srv._dedup_clear("claude-code-hook:default")
         self._run(json.dumps({
             "tool_name": "chimera_explore",
             "tool_input": {"value": "x"},
             "tool_response": "...",
         }))
-        entries = srv._dedup_load("claude-code-hook")
+        entries = srv._dedup_load("claude-code-hook:default")
         assert not any(e.get("tool_name", "").startswith("chimera_") for e in entries)

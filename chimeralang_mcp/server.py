@@ -5219,12 +5219,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             payload["estimated_tokens_after"] = tokens_after
             payload["estimated_tokens_saved"] = max(0, tokens_before - tokens_after)
             if auto_track and tokens_before > tokens_after:
-                tracked = _get_cost_tracker(namespace).record(
+                tracker = _get_cost_tracker(namespace)
+                tracked = tracker.record(
                     tokens_before=tokens_before,
                     tokens_after=tokens_after,
                     model=track_model,
                     label="chimera_log_compress",
                 )
+                _save_cost_tracker(namespace)
                 payload["tracked"] = {
                     "request_id": tracked["request_id"],
                     "savings_usd": tracked["savings"],
