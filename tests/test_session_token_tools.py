@@ -36,13 +36,16 @@ class TestBudgetAdvisoryInjection:
 
     def test_advisory_reflects_active_budget_lock(self):
         ns = "advisory-locked"
-        _call("chimera_budget_lock", {"action": "lock", "max_output_tokens": 1000, "namespace": ns})
-        payload = _call("chimera_explore", {"value": "x", "confidence": 0.5, "namespace": ns})
-        adv = payload["_chimera_session_budget"]
-        assert adv["lock_active"] is True
-        assert adv["lock_max_output_tokens"] == 1000
-        assert adv["lock_tokens_remaining"] == 1000
-        assert adv["advisory"] == "lock_ok"
+        try:
+            _call("chimera_budget_lock", {"action": "lock", "max_output_tokens": 1000, "namespace": ns})
+            payload = _call("chimera_explore", {"value": "x", "confidence": 0.5, "namespace": ns})
+            adv = payload["_chimera_session_budget"]
+            assert adv["lock_active"] is True
+            assert adv["lock_max_output_tokens"] == 1000
+            assert adv["lock_tokens_remaining"] == 1000
+            assert adv["advisory"] == "lock_ok"
+        finally:
+            _call("chimera_budget_lock", {"action": "release", "namespace": ns})
 
     def test_advisory_does_not_break_error_path(self):
         # Errors return _err which is a different code path — no advisory expected,

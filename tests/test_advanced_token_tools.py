@@ -357,10 +357,10 @@ class TestStopHook:
         proc = self._run()
         assert proc.returncode == 0
         out = proc.stdout.strip()
-        if out:  # may be silent if both saved=0 and tracked=0 — depends on prior state
-            ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-            assert "Session totals" in ctx
-            assert "Dedup" in ctx
+        assert out, "stop hook should emit output when dedup entries are tracked"
+        ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        assert "Session totals" in ctx
+        assert "Dedup" in ctx
 
 
 # ── PostToolUse now records into dedup ─────────────────────────────────────

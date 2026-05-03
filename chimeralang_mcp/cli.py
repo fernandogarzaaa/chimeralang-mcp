@@ -25,6 +25,12 @@ SESSION_POLICY = (
 )
 
 
+def _get_session_namespace(event: dict[str, Any]) -> str:
+    """Derive session-scoped namespace from event payload."""
+    session_id = str(event.get("session_id") or event.get("sessionId") or "default")
+    return f"{HOOK_NAMESPACE}:{session_id}"
+
+
 def _hook_emit(event: str, additional_context: str | None) -> None:
     if not additional_context:
         return
@@ -47,13 +53,13 @@ def _read_hook_event() -> dict[str, Any]:
         return {"prompt": raw}
 
 
-def _call_optimize_sync(text: str) -> dict[str, Any]:
+def _call_optimize_sync(text: str, namespace: str) -> dict[str, Any]:
     from chimeralang_mcp import server as srv
 
     async def _run() -> dict[str, Any]:
         result = await srv.call_tool(
             "chimera_optimize",
-            {"text": text, "namespace": HOOK_NAMESPACE, "level": "medium"},
+            {"text": text, "namespace": namespace, "level": "medium"},
         )
         for item in result.content:
             payload = getattr(item, "text", None)
@@ -66,11 +72,12 @@ def _call_optimize_sync(text: str) -> dict[str, Any]:
 
 def _hook_user_prompt() -> int:
     event = _read_hook_event()
+    session_namespace = _get_session_namespace(event)
     prompt = str(event.get("prompt", "") or "")
     if len(prompt) < HOOK_PROMPT_THRESHOLD:
         return 0
     try:
-        payload = _call_optimize_sync(prompt)
+        payload = _call_optimize_sync(prompt, session_namespace)
     except Exception as exc:  # pragma: no cover - hook must never break the session
         sys.stderr.write(f"chimeralang hook: optimize failed: {exc}\n")
         return 0
@@ -94,7 +101,14 @@ def _hook_user_prompt() -> int:
 
 
 def _hook_session_start() -> int:
-    _read_hook_event()
+    event = _read_hook_event()
+    session_namespace = _get_session_namespace(event)
+    # Clear session-scoped state to ensure fresh isolation
+    try:
+        from chimeralang_mcp import server as srv
+        srv._dedup_clear(session_namespace)
+    except Exception as exc:  # pragma: no cover
+        sys.stderr.write(f"chimeralang hook: session_start clear failed: {exc}\n")
     _hook_emit("SessionStart", SESSION_POLICY)
     return 0
 
@@ -103,21 +117,21 @@ def _is_chimera_tool(tool_name: str) -> bool:
     return tool_name.startswith("chimera_") or "chimeralang" in tool_name
 
 
-def _record_dedup_safely(tool_name: str, tool_input: Any, response_text: str) -> dict | None:
+def _record_dedup_safely(namespace: str, tool_name: str, tool_input: Any, response_text: str) -> dict | None:
     """Best-effort dedup record. Never raises into the hook."""
     try:
         from chimeralang_mcp import server as srv
-        return srv._dedup_record(HOOK_NAMESPACE, tool_name, tool_input, response_text)
+        return srv._dedup_record(namespace, tool_name, tool_input, response_text)
     except Exception as exc:  # pragma: no cover - hook must never break the session
         sys.stderr.write(f"chimeralang hook: dedup_record failed: {exc}\n")
         return None
 
 
-def _lookup_dedup_safely(tool_name: str, tool_input: Any) -> dict | None:
+def _lookup_dedup_safely(namespace: str, tool_name: str, tool_input: Any) -> dict | None:
     try:
         from chimeralang_mcp import server as srv
         key = srv._dedup_key(tool_name, tool_input)
-        return srv._dedup_lookup(HOOK_NAMESPACE, key)
+        return srv._dedup_lookup(namespace, key)
     except Exception as exc:  # pragma: no cover
         sys.stderr.write(f"chimeralang hook: dedup_lookup failed: {exc}\n")
         return None
@@ -125,6 +139,7 @@ def _lookup_dedup_safely(tool_name: str, tool_input: Any) -> dict | None:
 
 def _hook_post_tool_use() -> int:
     event = _read_hook_event()
+    session_namespace = _get_session_namespace(event)
     tool_name = str(event.get("tool_name") or "")
     if not tool_name:
         return 0
@@ -143,7 +158,7 @@ def _hook_post_tool_use() -> int:
         # them to avoid recursive growth.
         return 0
     tool_input = event.get("tool_input") or event.get("input") or {}
-    _record_dedup_safely(tool_name, tool_input, response_text)
+    _record_dedup_safely(session_namespace, tool_name, tool_input, response_text)
     size = len(response_text)
     if size < HOOK_TOOL_RESPONSE_THRESHOLD:
         return 0
@@ -168,6 +183,7 @@ def _input_size(tool_input: Any) -> int:
 
 def _hook_pre_tool_use() -> int:
     event = _read_hook_event()
+    session_namespace = _get_session_namespace(event)
     tool_name = str(event.get("tool_name") or "")
     if not tool_name or _is_chimera_tool(tool_name):
         return 0
@@ -175,7 +191,7 @@ def _hook_pre_tool_use() -> int:
     notes: list[str] = []
 
     # 1. Dedup hit — same tool + same args as a prior call this session.
-    prior = _lookup_dedup_safely(tool_name, tool_input)
+    prior = _lookup_dedup_safely(session_namespace, tool_name, tool_input)
     if prior and int(prior.get("hit_count") or 0) >= 0 and prior.get("response_chars"):
         notes.append(
             "[chimera-token-saver] '{tool}' was already called with these exact args "
@@ -208,14 +224,15 @@ def _hook_pre_tool_use() -> int:
 
 
 def _hook_stop() -> int:
-    _read_hook_event()
+    event = _read_hook_event()
+    session_namespace = _get_session_namespace(event)
     try:
         from chimeralang_mcp import server as srv
 
         async def _run() -> dict:
             result = await srv.call_tool(
                 "chimera_session_report",
-                {"namespace": HOOK_NAMESPACE, "include_dedup": True},
+                {"namespace": session_namespace, "include_dedup": True},
             )
             for item in result.content:
                 payload = getattr(item, "text", None)
