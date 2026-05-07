@@ -1,15 +1,19 @@
-# Case Study: Adding a Token-Efficient AI-Only Language to an MCP Server
+# Case Study: Designing an AI-Only Wire Format for an MCP Server
 
 **Project:** [`chimeralang-mcp`](https://github.com/fernandogarzaaa/chimeralang-mcp)
-**Feature:** Chimera Glyph (CG) — a custom pidgin language for AI-to-AI reasoning, plus two MCP tools that expose it.
-**Releases:** v0.7.0 (feature) → v0.7.1 (review-driven fixes).
+**Feature:** Chimera Glyph (CG) — a deterministic AI-to-AI wire format with sigil-marked entities and explicit modality tokens, plus two MCP tools that expose it.
+**Releases:** v0.7.0 (feature) → v0.7.1 (review-driven fixes) → v0.7.3 (empirical lexicon + benchmark, see addendum).
 **Date range:** 2026-05-07.
+
+> **2026-05-07 update — see "0.7.3 addendum" below.** A 100-sentence formal benchmark falsified this case study's original headline claim. Glyph's value is **semantic determinism + entity preservation**, not token compression; the updated numbers and reframe are at the end of this document.
 
 ---
 
 ## Executive summary
 
-Designed and shipped a new feature for an open-source [Model Context Protocol](https://modelcontextprotocol.io) server that lets a large language model communicate in a custom token-efficient pidgin during internal reasoning, then translate the result back to English for the human reader at the end. The feature ships as two new MCP tools (`chimera_glyph_directive`, `chimera_glyph_translate`) plus a self-contained 489-line language module. Across two release cycles the feature was reviewed by three automated reviewers (CodeRabbit, Codex, Copilot), revealing eight real defects that were resolved in a follow-up release. Final result: a published PyPI package (`chimeralang-mcp 0.7.1`), 206 passing tests (25 covering the new module), and a measured **46.2% token reduction** end-to-end across a representative corpus.
+Designed and shipped a new feature for an open-source [Model Context Protocol](https://modelcontextprotocol.io) server that lets a large language model communicate in a structured pidgin during internal reasoning, then translate the result back to English for the human reader at the end. The feature ships as two new MCP tools (`chimera_glyph_directive`, `chimera_glyph_translate`) plus a self-contained 489-line language module. Across two release cycles the feature was reviewed by three automated reviewers (CodeRabbit, Codex, Copilot), revealing eight real defects that were resolved in a follow-up release.
+
+The original headline metric was **46.2% token reduction**, measured on a 10-sentence corpus by counting the project's internal char-based estimator. A formal 100-sentence benchmark in 0.7.3 against `tiktoken` `o200k_base` (a Claude-equivalent BPE) showed the original metric was a *character* count, not a *token* count — and on real BPE the encoded form is actually **−16% on tokens** (longer than English). The 0.7.3 addendum below documents the falsification, the empirically-optimized lexicon that closed +9 percentage points of the gap, and the strategic reframe: **Glyph is a deterministic structured wire format, not a token compressor.**
 
 ---
 
@@ -132,19 +136,19 @@ Net: in two cycles, automated reviewers caught **8 issues** I would otherwise ha
 - **Repository:** 206 total tests pass on `main`. Zero regressions across both releases.
 - **Coverage strategy:** unit tests on `encode`/`decode` for round-trip semantics, integration tests on both MCP tools via the same `_tool_payload` helper the rest of the suite uses, and explicit regression tests for each of the eight bugs found in review.
 
-### Performance
+### Performance (0.7.0 — superseded; see 0.7.3 addendum)
 
-Measured end-to-end on a 10-sentence corpus running on the same machine:
+Measured end-to-end on a 10-sentence corpus running on the same machine, **using the project's char-based token estimator (`chars // 4`), not a real BPE tokenizer**:
 
 | Metric | Value |
 |---|---|
-| English tokens (corpus total) | 104 |
-| Glyph tokens (corpus total) | 56 |
-| Tokens saved | 48 (**46.2%**) |
+| Estimated English tokens (corpus total) | 104 |
+| Estimated Glyph tokens (corpus total) | 56 |
+| Estimated saving | 48 (**46.2%** by char-based estimator) |
 | End-to-end time (10× encode + estimate + decode) | 1.07 ms |
 | Per-sentence latency | **0.11 ms** |
 
-The 46.2% reduction is on a representative mix of imperative, conditional, and modal sentences. Token-savings ratio scales with sentence type — single-clause sentences with many articles (e.g. *"The model returned a null result."*) hit closer to 60%; sentences with proper nouns or out-of-lexicon technical terms hit closer to 30%.
+The 46.2% number is real, but it measures *characters / 4*, not BPE tokens. The 0.7.3 addendum re-runs this benchmark against `tiktoken o200k_base` and reports the corrected token-cost numbers.
 
 ### Robustness
 
@@ -179,7 +183,10 @@ The two release runs (0.7.0 and 0.7.1) each completed in under 30 seconds.
 | Published artifact | `chimeralang-mcp 0.7.1` on PyPI |
 | Pull requests merged | [#7](https://github.com/fernandogarzaaa/chimeralang-mcp/pull/7), [#8](https://github.com/fernandogarzaaa/chimeralang-mcp/pull/8) |
 | Defects shipped to production | Zero (all eight review findings addressed before final merge) |
-| Measured token savings | 46.2% on a representative corpus |
+| Char-based estimator (0.7.0) | 46.2% reduction on 10-sentence corpus (superseded — see addendum) |
+| BPE-token measurement (0.7.3) | **−16.0%** on 100-sentence corpus (Glyph is *longer* in BPE tokens) |
+| Char-based measurement (0.7.3) | **+19.2%** on 100-sentence corpus |
+| Decode fidelity (0.7.3) | **0.806** mean Jaccard token overlap (lossy by design) |
 
 ---
 
@@ -203,3 +210,111 @@ The two release runs (0.7.0 and 0.7.1) each completed in under 30 seconds.
 - **Feature PR:** [#7](https://github.com/fernandogarzaaa/chimeralang-mcp/pull/7)
 - **Fix PR:** [#8](https://github.com/fernandogarzaaa/chimeralang-mcp/pull/8)
 - **Published package:** [`chimeralang-mcp` on PyPI](https://pypi.org/project/chimeralang-mcp/)
+
+---
+
+## 0.7.3 addendum — formal benchmark falsifies the token-cost claim
+
+This addendum was added after an independent code+competitive audit prompted a Phase 1 effort to validate Glyph's headline metric against a real BPE tokenizer. The empirical finding falsified the original claim and led to a strategic reframe.
+
+### What the audit asked
+
+> *"60% reduction" measured how — characters or tokens? Against which tokenizer?*"
+
+The 0.7.0 case study above reported "46.2% reduction" using the project's internal `chars // 4` estimator. That's a useful proxy for human-readable text but it's not what an LLM actually pays at the API boundary.
+
+### What the formal benchmark measured
+
+A new harness (`tools/glyph_benchmark.py`) was built and run against a 100-sentence corpus (`tests/fixtures/glyph_bench.txt`) covering 5 domains: error/debugging, dialogue, instruction, reasoning, and prose. Each sentence is encoded with `cg.encode()`, decoded with `cg.decode()`, and token-counted with `tiktoken`'s `o200k_base` (a Claude-equivalent BPE).
+
+**Run-1 numbers (against the original 0.7.2 hand-crafted lexicon):**
+
+| Metric | Value |
+|---|---|
+| Mean token reduction (BPE) | **−4.0%** (Glyph longer than English) |
+| Stems strictly worse than English in BPE | 74 of 249 (30%) |
+| Stems beating English in BPE | 0 of 249 |
+| Char reduction | +34.6% |
+
+The 46.2% number was character-only. On real BPE the original lexicon was a net loss.
+
+### Why hand-crafted glyph stems fail against BPE
+
+Modern BPE tokenizers like `o200k_base` were trained on natural text. Common English words (`user`, `function`, `code`, `approach`) are already collapsed into single tokens. Hand-crafted abbreviations (`usr`, `fn`, `cde`, `aprch`) aren't in the merge table and decompose into 2-3 sub-tokens. The verb suffix scheme was the worst offender — `fix^` becomes 2 tokens, `bld^` becomes 3 tokens, `gø~` becomes 3 tokens. Multi-byte Unicode operators (`∅`, `∀`, `∃`, `∧`, `¬`, `≈`, `≡`) all cost 2+ tokens in `o200k_base`.
+
+### The empirical optimization
+
+`tools/optimize_lexicon.py` re-derived every English→Glyph mapping by measuring against `o200k_base` directly and picking the form (English, current stem, or English-language operator equivalent) that BPE-collapses to the fewest tokens. Decoder backwards-compatibility is preserved via `LEGACY_GLYPH_REVERSE`, so any CG text emitted by ≤ 0.7.2 still decodes correctly.
+
+74 entries changed:
+- Tense-suffix forms retired (`fix^` → `fixed`, `wnt^` → `wanted`, `gø~` → `going`).
+- Multi-token Unicode operators replaced with English (`∧` → `and`, `∨` → `or`, `∅` → `none`, `∀` → `all`).
+- Multi-token abbreviations reverted to English (`cde` → `code`, `aprch` → `approach`, `wrk` → `work`, `wnt` → `want`).
+- Single-token Unicode operators kept (`⇒`, `←`, `≠`, `→` are 1 token in BPE).
+
+**Run-2 numbers (after empirical optimization, on the original 20-sentence corpus):** −4.0% → **+5.3%**.
+
+### Run-3 — the 100-sentence formal benchmark
+
+On the formal corpus, the optimized lexicon does this:
+
+| Domain | n | BPE tokens saved | Char saving | Decode fidelity |
+|---|---|---|---|---|
+| Error / debugging | 20 | **−2.4%** | 27.5% | 0.85 |
+| Dialogue / conversational | 20 | **−13.3%** | 21.5% | 0.70 |
+| Instruction / prompt | 20 | **−21.7%** | 14.2% | 0.81 |
+| Reasoning / explanation | 20 | **−9.3%** | 25.0% | 0.82 |
+| Prose / narrative | 20 | **−26.7%** | 13.0% | 0.85 |
+| **Overall** | **100** | **−16.0%** | **+19.2%** | **0.806** |
+
+On real prose, even the optimized Glyph is **16% longer in BPE tokens** than the English source. The character-saving (19.2%) is real. The token cost is not.
+
+### Why the optimized lexicon still loses on tokens
+
+The benchmark harness exposes three remaining sources of loss:
+
+1. **`@entity` sigil overhead.** Out-of-lexicon words get the `@` prefix, which is itself a token. On prose, ~15-20% of content words are `@`-tagged.
+2. **Modal/sigil tokens.** Glyph emits `~`, `?`, `!`, `→` as separate tokens. English collapses "will go" / "might fail" into 2 BPE tokens; Glyph emits 2-3.
+3. **Common English already wins.** Pronouns (`we`/`it`/`they` → `w`/`x`/`t`) are 1 token both ways — no saving. Articles drop, but BPE often packs `the user` into 1-2 tokens already.
+
+### Strategic reframe — what Glyph actually does
+
+The hand-crafted glyph-language approach cannot beat learned BPE on token cost. The academic literature converged on **learned compression** (LLMLingua-2, 20× reduction with ~1.5pt accuracy drop) for that reason — invented symbol tables can't beat a tokenizer that already absorbed the same pattern.
+
+But the benchmark also shows what Glyph *is* good at, and these are properties no token-compression library provides:
+
+| Property | Glyph (measured) | English | LLMLingua-2 |
+|---|---|---|---|
+| Decode determinism (no LLM call to invert) | ✅ 0.806 fidelity, deterministic | n/a | ❌ requires inference |
+| Sigil-marked entities (`@MyService` is unambiguously a proper noun) | ✅ first-class | ❌ requires NER | ❌ no semantic markup |
+| Explicit modality tokens (`~` will, `?` might, `!` must) | ✅ typed at wire level | ❌ implicit | ❌ no semantic markup |
+| Stripped function words (drops articles + copulas) | ✅ +19.2% chars | n/a | partially |
+| Round-trippable structure for protocol verification | ✅ | ❌ | ❌ |
+
+These are exactly the properties needed by a **typed wire format for agent-to-agent communication** — which is the original "AI-only language" framing, just measured against the right metric. Token cost was the wrong success criterion.
+
+### What v0.7.3 ships
+
+- Empirically-optimized `LEXICON` (74 entries changed; tools/lexicon_diff.json is the audit trail).
+- `LEGACY_GLYPH_REVERSE` dict so all v0.7.2 CG text still decodes.
+- `tools/glyph_benchmark.py` — reproducible benchmark harness; anyone can run `python tools/glyph_benchmark.py` and verify the −16% / +19.2% / 0.806 numbers.
+- `tests/fixtures/glyph_bench.txt` — the 100-sentence corpus.
+- `tests/test_glyph_benchmark.py` — locks the headline numbers as a regression test.
+- 6 new tokenizer-aware tests in `tests/test_ai_language.py` plus updated 0.7.2-era assertions; legacy stems verified via decoder-roundtrip tests.
+- Schema fields on `chimera_glyph_directive` corrected: dropped the false `expected_token_savings: "60-80%"` field; replaced with honest `wire_format_role`, `measured_char_reduction`, `measured_token_reduction`, and `decode_fidelity` fields.
+- Case study, SKILL.md, AGENTS.md updated to publish the corrected numbers.
+
+### What this means for the project
+
+Glyph is no longer pitched as a token-cost solution. For token reduction, use:
+- `chimera_optimize` / `chimera_compress` / `chimera_fracture` (heuristic, real wins on long docs)
+- `chimera_cache_mark` (Anthropic native prompt cache, lossless 75–90%)
+- LLMLingua-2 or similar learned compressors (external, best-in-class)
+
+Glyph's value is now positioned as the substrate for **Phase 4 of the project blueprint** — a typed wire format for cross-agent reasoning where deterministic decode and sigil semantics matter more than token count. The 19.2% char saving is a useful side benefit; the 0.806 decode fidelity and the structural guarantees are the reason to use it.
+
+### Reflection
+
+The most valuable engineering output of this work was *measuring honestly*. The original case study reported a real number from a real estimator — but it was the wrong metric for the cost the user actually pays. Building the benchmark harness, running it against the real BPE, publishing the negative finding, and reframing the feature accordingly is the path that keeps the project credible. The alternative (defending the original number) would have made every future claim suspect.
+
+The Phase 1 outcome is recorded in `BLUEPRINT.md` and was used to reorder the remaining roadmap. Phase 2 (gates → ChimeraLang programs with Merkle proofs) is the actual moat per the audit and is now next on the critical path.

@@ -12,31 +12,36 @@ Independent audit (2026-05-07) identified the project's **real moat**: it's the 
 
 ---
 
-## Phase 1 — Tokenizer-aware Glyph
+## Phase 1 — Tokenizer-aware Glyph **[COMPLETE — falsification + reframe]**
 
-**Goal:** Push Glyph compression from the current self-reported 46.2% to a measured ≥60% on a public corpus, by aligning the lexicon with Claude's actual BPE token boundaries.
+**Original goal:** Push Glyph compression from the self-reported 46.2% to ≥60% measured on a public corpus.
 
-**Why this first:** Independent, externally measurable, and fully de-risks the headline number. If the spike fails, we know early before committing to weeks of structural work in Phase 2.
+**Outcome:** The original 46.2% number was a **character** count, not a **token** count. The formal 100-sentence benchmark against `tiktoken o200k_base` (Claude-equivalent BPE) returned **−16.0% on tokens, +19.2% on chars, 0.806 decode fidelity**. The hand-crafted glyph approach cannot beat learned BPE — modern tokenizers already collapse common English to single tokens.
+
+**Strategic outcome:** Glyph reframed as a **deterministic AI-to-AI wire format with semantic round-trip** (sigil-marked entities, explicit modality tokens, lossy-but-deterministic decode). Token-cost claims dropped from all surfaces. The empirical lexicon, benchmark harness, and corpus all shipped — they make every future claim measurable.
 
 ### Sub-tasks
-- [x] **Spike (P1.S1):** Tokenize current Glyph stems with a Claude-equivalent BPE (tiktoken o200k_base as proxy). Measure: how many of the ~150 stems already map to single tokens? How many are 2+ token? Identify the worst offenders.
-- [ ] **Go/No-go decision (P1.S2):** If headroom ≥15% additional savings is plausible from re-stemming, commit to full optimization. If <10%, pivot Phase 1 to a different angle (e.g., better operator coverage).
-- [ ] **Lexicon optimization (P1.S3):** Greedy-replace 2+ token stems with 1-token alternatives, scored by `tokens_saved × decode_fidelity_kept`. Preserve all decoder semantics — every old stem must still decode if it appears in legacy CG text.
-- [ ] **Public benchmark corpus (P1.S4):** Assemble a 100-sentence representative corpus across coding, reasoning, dialogue, and instruction domains. Source: existing test fixtures + hand-curated additions. Commit as `tests/fixtures/glyph_bench.txt`.
-- [ ] **Measurement harness (P1.S5):** `tools/glyph_benchmark.py` — encodes corpus, counts tokens with tiktoken o200k_base + Anthropic API (when key available), reports pct_saved, decode fidelity (BLEU or token-overlap), and per-sentence breakdown.
-- [ ] **Regression tests (P1.S6):** Lock the new measurements into `tests/test_glyph_benchmark.py` so future changes can't silently regress.
-- [ ] **Public writeup (P1.S7):** Update `docs/case-studies/chimera-glyph-feature.md` with the new numbers + side-by-side comparison vs LLMLingua-2 (cost-only, since they require GPU inference).
+- [x] **Spike (P1.S1):** `tools/glyph_spike.py` ran against `o200k_base` — 0 of 249 stems beat English, 74 strictly worse, corpus −4%.
+- [x] **Go/No-go decision (P1.S2):** Headroom 9.3% (below 15% gate) → strategy pivoted from "push to 60%" to "publish honest numbers + reframe."
+- [x] **Lexicon optimization (P1.S3):** `tools/optimize_lexicon.py` empirically rebuilt 74 entries; `LEGACY_GLYPH_REVERSE` preserves decoder backwards-compat for any 0.7.2 CG.
+- [x] **Public benchmark corpus (P1.S4):** `tests/fixtures/glyph_bench.txt` — 100 sentences, 5 domains.
+- [x] **Measurement harness (P1.S5):** `tools/glyph_benchmark.py` — reproducible, with optional `--validate-anthropic` flag for the real API.
+- [x] **Regression tests (P1.S6):** `tests/test_glyph_benchmark.py` locks −16.0% / +19.2% / 0.806 with ±1pp / ±1pp / ≥0.75 bounds.
+- [x] **Public writeup (P1.S7):** `docs/case-studies/chimera-glyph-feature.md` extended with a 0.7.3 addendum that publishes the falsification, the empirical optimization, the 100-sentence numbers, and the reframe. Token-cost claims dropped from `SKILL.md`, `AGENTS.md`, and `chimera_glyph_directive`'s response schema.
 
-### Success criteria
-- [ ] Measured ≥55% reduction on the 100-sentence benchmark (60% is the stretch goal)
-- [ ] Decode fidelity ≥75% token overlap with original English (lossy is fine, but not gibberish)
-- [ ] Zero regressions on existing 222 tests
-- [ ] Benchmark numbers reproducible by anyone running `python tools/glyph_benchmark.py`
+### Final measurements (v0.7.3)
 
-### Risks
-1. **BPE doesn't favor short Latin stems.** o200k_base groups frequent words into single tokens; "user" might already be 1 token, making "usr" a *worse* fit. The spike must measure this honestly.
-2. **Anthropic tokenizer ≠ o200k_base exactly.** Mitigation: validate top-20 candidates against the real `messages.count_tokens` API before locking the lexicon.
-3. **Decode fidelity drops below 75%.** Mitigation: keep the old stem as a decoder-only fallback in REVERSE_LEXICON; only swap the encoder direction.
+| Metric | Value | Bound (regression test) |
+|---|---|---|
+| Token reduction (BPE) | **−16.0%** | [−17.0%, −15.0%] |
+| Character reduction | **+19.2%** | [+18.0%, +21.0%] |
+| Decode fidelity (Jaccard) | **0.806** | ≥ 0.75 floor |
+| Worst-domain fidelity | 0.70 (dialogue) | ≥ 0.50 floor per domain |
+
+### What the negative finding bought us
+1. **Honest measurement infrastructure** — every future Glyph change has a published number to beat.
+2. **Empirical lexicon** — strictly better than 0.7.2 across all measured domains, even though the absolute number is still negative on tokens.
+3. **Strategic clarity** — Phase 4 (cross-agent protocol) is now the natural home for Glyph; the reframe ties Phase 1's investment directly into Phase 4 instead of competing with token-compression incumbents (LLMLingua-2, Anthropic prompt cache).
 
 ---
 

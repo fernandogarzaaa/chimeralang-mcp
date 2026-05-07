@@ -1,6 +1,6 @@
 # Codex Agent Guide — chimeralang-mcp
 
-> **chimera_version: 0.7.2** — keep this in sync with `pyproject.toml` and `.claude/skills/chimera/SKILL.md`.
+> **chimera_version: 0.7.3** — keep this in sync with `pyproject.toml` and `.claude/skills/chimera/SKILL.md`.
 
 This file is the Codex-readable adapter of the **chimera skill**. The canonical version lives at `.claude/skills/chimera/SKILL.md`; this is the same routing matrix in the location Codex actually walks.
 
@@ -10,7 +10,7 @@ When Codex is operating inside this repository, follow these rules.
 
 ## When to invoke chimeralang-mcp
 
-The chimeralang-mcp server (currently `0.7.2`) exposes 51 tools. Pick the smallest correct subset for the user's actual intent — never invoke all of them.
+The chimeralang-mcp server (currently `0.7.3`) exposes 51 tools. Pick the smallest correct subset for the user's actual intent — never invoke all of them.
 
 **Skip chimera tools entirely** if:
 - Prompt is `< 200` chars and has no attached document/log/history.
@@ -83,7 +83,7 @@ For internal reasoning the user will not directly read:
 - CG: `usr wnt kn fix err $rt fn.` (≈8 tokens)
 - Decoded: *"User wants know fix error return function."*
 
-Measured: 46.2% token reduction on a 10-sentence corpus, 0.11 ms/sentence end-to-end. See `docs/case-studies/chimera-glyph-feature.md` for the benchmark.
+**Measured (0.7.3, 100-sentence benchmark, tiktoken o200k_base):** Glyph is **−16% on tokens** (encoded form is *longer* in BPE tokens) and **+19.2% on characters**, with **0.806 decode fidelity**. The hand-crafted glyph approach cannot beat learned BPE on token cost — modern tokenizers already collapse common English to single tokens. Glyph's value is **semantic determinism**, not compression: deterministic decode, sigil-marked entities, explicit modality tokens. Use `chimera_optimize` / `chimera_fracture` / `chimera_cache_mark` for actual token reduction. See `docs/case-studies/chimera-glyph-feature.md` for the full benchmark.
 
 ---
 
@@ -163,7 +163,7 @@ Skip any step that would cost more tokens than it saves.
 ## Project-specific Codex notes
 
 - **Branch convention.** All new development for AI coding agents in this repo lives on `claude/<task-slug>` or `docs/<task-slug>` branches. Never push directly to `main`. Open a PR.
-- **Tests.** `python -m pytest -q` from repo root. 222 tests pass on `main` as of `0.7.2`. Don't ship a change that drops that count.
+- **Tests.** `python -m pytest -q` from repo root. 234 tests pass on `main` as of `0.7.3`. Don't ship a change that drops that count.
 - **Release pipeline.** Merging to `main` triggers `.github/workflows/publish.yml` which uploads to PyPI via OIDC Trusted Publishing. Bump `pyproject.toml` AND `chimeralang_mcp/__init__.py` together.
 - **Code style.** No new dependencies in the language module (`chimeralang_mcp/ai_language.py` is stdlib-only). Match existing patterns in `server.py` rather than refactoring.
 

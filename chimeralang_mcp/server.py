@@ -5359,7 +5359,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "directive": directive_text,
                 "style": style,
                 "language": "Chimera Glyph (CG)",
-                "expected_token_savings": "60-80%",
+                "wire_format_role": "deterministic AI-to-AI structured wire format with semantic round-trip, sigil-marked entities, and explicit modality tokens",
+                "measured_char_reduction": "19.2% on the 100-sentence benchmark (tools/glyph_benchmark.py)",
+                "measured_token_reduction": "-16% on the 100-sentence benchmark — Glyph optimizes for semantic determinism, NOT token cost. Use chimera_optimize / chimera_compress / chimera_cache_mark for token reduction.",
+                "decode_fidelity": "0.806 (lossy by design; entities and modality preserved verbatim)",
                 "grammar_summary": _ai_language.GRAMMAR_SPEC,
                 "examples": [
                     {"english": "The user wants to know how to fix the error in the function.",
