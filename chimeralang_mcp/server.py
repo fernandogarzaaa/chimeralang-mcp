@@ -54,6 +54,7 @@ from chimeralang_mcp.token_engine import (
 from chimeralang_mcp.envelope import ResultEnvelope, merge_envelopes
 from chimeralang_mcp.materials import MaterialRegistry, get_material_registry
 from chimeralang_mcp.persistence import PersistentNamespaceStore
+from chimeralang_mcp import ai_language as _ai_language
 
 # ── AGI: pure-Python implementations (no external core.* dependency) ────────
 import hashlib as _hashlib
@@ -2959,6 +2960,56 @@ async def list_tools() -> list[Tool]:
                 },
             },
         ),
+        Tool(
+            name="chimera_glyph_directive",
+            description=(
+                "Emit a system instruction that forces an AI agent to write only in "
+                "Chimera Glyph (CG) — a compact AI-only pidgin designed for token "
+                "efficiency. The returned `directive` should be injected as a system "
+                "message; the calling AI then produces CG output, and the human-visible "
+                "translation happens via chimera_glyph_translate."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "style": {
+                        "type": "string",
+                        "enum": ["strict", "balanced"],
+                        "description": "strict = REJECT non-CG output; balanced = brief English fallback allowed.",
+                        "default": "strict",
+                    },
+                    "task_hint": {
+                        "type": "string",
+                        "description": "Optional one-line description of the task the AI is about to perform; appended to the directive.",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="chimera_glyph_translate",
+            description=(
+                "Translate Chimera Glyph (CG) text back into readable English. Lossy "
+                "by design: reconstructs meaning, not surface form. Use this at the "
+                "end of an AI-internal CG reasoning chain to produce a human-readable "
+                "summary."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "glyph_text": {
+                        "type": "string",
+                        "description": "Chimera Glyph encoded text to translate.",
+                    },
+                    "verbosity": {
+                        "type": "string",
+                        "enum": ["terse", "natural"],
+                        "description": "terse = minimal expansion; natural = insert articles/copulas for fluent English.",
+                        "default": "natural",
+                    },
+                },
+                "required": ["glyph_text"],
+            },
+        ),
     ]
 
 
@@ -5296,6 +5347,57 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     ],
                 }
             return _ok(report)
+
+        # ── chimera_glyph_directive ───────────────────────────────────────
+        elif name == "chimera_glyph_directive":
+            style = str(arguments.get("style", "strict")).lower()
+            if style not in ("strict", "balanced"):
+                style = "strict"
+            task_hint = arguments.get("task_hint") or None
+            directive_text = _ai_language.directive(style=style, task_hint=task_hint)
+            return _ok({
+                "directive": directive_text,
+                "style": style,
+                "language": "Chimera Glyph (CG)",
+                "expected_token_savings": "60-80%",
+                "grammar_summary": _ai_language.GRAMMAR_SPEC,
+                "examples": [
+                    {"english": "The user wants to know how to fix the error in the function.",
+                     "glyph": _ai_language.encode("The user wants to know how to fix the error in the function.")},
+                    {"english": "If the test fails, then we should retry it.",
+                     "glyph": _ai_language.encode("If the test fails, then we should retry it.")},
+                    {"english": "I think this approach will work.",
+                     "glyph": _ai_language.encode("I think this approach will work.")},
+                ],
+                "translator_tool": "chimera_glyph_translate",
+                "usage": (
+                    "Inject `directive` as a system message before the agent's task. "
+                    "After the agent produces CG output, pass it through "
+                    "chimera_glyph_translate to recover human-readable English."
+                ),
+            })
+
+        # ── chimera_glyph_translate ───────────────────────────────────────
+        elif name == "chimera_glyph_translate":
+            glyph_text = arguments["glyph_text"]
+            verbosity = str(arguments.get("verbosity", "natural")).lower()
+            english, notes = _ai_language.decode(glyph_text)
+            if verbosity == "terse":
+                # collapse "the"/"is" inserted by the natural-mode heuristic
+                english = re.sub(r"\bthe\s+", "", english)
+                english = re.sub(r"\bis\s+", "", english)
+                english = re.sub(r"\s+", " ", english).strip()
+                if english and english[-1] not in ".!?":
+                    english += "."
+            return _ok({
+                "english": english,
+                "glyph_text": glyph_text,
+                "glyph_tokens": max(0, len(glyph_text) // 4),
+                "english_tokens": max(0, len(english) // 4),
+                "lossy": True,
+                "verbosity": verbosity,
+                "notes": notes,
+            })
 
         else:
             return _err(f"Unknown tool: {name}")
