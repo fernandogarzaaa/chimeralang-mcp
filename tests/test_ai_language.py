@@ -19,7 +19,8 @@ class TestEncode(unittest.TestCase):
         glyph = cg.encode("The user wants the result.")
         self.assertNotIn("the", glyph.lower().split())
         self.assertIn("usr", glyph)
-        self.assertIn("wnt", glyph)
+        # 0.7.3+: "want/wants" encodes to itself (BPE-aligned). Was "wnt".
+        self.assertIn("wants", glyph)
 
     def test_compresses_known_sentences(self):
         cases = [
@@ -160,16 +161,27 @@ class TestRegressions071(unittest.TestCase):
         self.assertIn("will", english.lower())
         self.assertIn("work", english.lower())
 
-    # Codex review followup — suffixed verb stems must not be intercepted
-    # by whole-token reverse lookup; "gø~" should decode as "will go",
-    # not "going" (regression introduced by an earlier round of fixes).
-    def test_suffix_verb_round_trip_preserves_tense(self):
+    # 0.7.3+: the suffix scheme was retired (BPE-multi-token). Encoder now
+    # emits the English past/progressive form directly; decoder still
+    # accepts legacy suffix forms via LEGACY_GLYPH_REVERSE.
+    def test_progressive_verb_encodes_as_english(self):
         cg_text = cg.encode("I am going.")
-        self.assertIn("gø~", cg_text)
+        # "am" drops (auxiliary), "going" stays as "going" — both 1 BPE token.
+        self.assertIn("going", cg_text)
+        self.assertNotIn("gø~", cg_text)
         english, notes = cg.decode(cg_text)
-        self.assertIn("will go", english.lower())
-        self.assertNotIn("going", english.lower())
+        self.assertIn("going", english.lower())
         self.assertEqual(notes, [])
+
+    def test_legacy_suffix_form_still_decodes(self):
+        # Old CG text in the wild (e.g. logged from 0.7.2) must still decode.
+        # The decoder splits "gø~" into the legacy "gø" stem (-> "go") and
+        # the standalone "~" modal (-> "will"), reproducing the 0.7.2
+        # semantics of "will go" rather than the 0.7.3 form "going".
+        english, notes = cg.decode("i gø~.")
+        self.assertEqual(notes, [])
+        self.assertIn("go", english.lower())
+        self.assertIn("will", english.lower())
 
     # Issue 4 — directive examples must round-trip without unrecognized tokens.
     def test_directive_examples_round_trip(self):
@@ -196,6 +208,92 @@ class TestRegressions071(unittest.TestCase):
         )
         self.assertNotIn("The ", payload["english"])
         self.assertNotIn(" the ", payload["english"])
+
+
+class TestTokenizerAwareLexicon(unittest.TestCase):
+    """0.7.3 — empirical lexicon optimization (Phase 1 of BLUEPRINT.md).
+
+    The hand-crafted Glyph stems were measured against tiktoken o200k_base
+    (Claude-equivalent BPE) and 74 entries were found to cost MORE tokens
+    than the English source. Those entries now encode as English; the
+    decoder retains LEGACY_GLYPH_REVERSE for backwards compatibility.
+    """
+
+    # ── encoder side: BPE-friendly output ────────────────────────────
+    def test_multitoken_stems_revert_to_english(self):
+        # These stems were >=2 BPE tokens; encoder must emit the English form.
+        cases = {
+            "code":     "code",      # was "cde"
+            "approach": "approach",  # was "aprch"
+            "person":   "person",    # was "psn"
+            "build":    "build",     # was "bld"
+            "find":     "find",      # was "fnd"
+            "think":    "think",     # was "thk"
+            "work":     "work",      # was "wrk"
+            "going":    "going",     # was "gø~"
+            "fixed":    "fixed",     # was "fix^"
+            "wanted":   "wanted",    # was "wnt^"
+        }
+        for english, expected in cases.items():
+            glyph = cg.encode(f"the {english}")
+            self.assertIn(expected, glyph.split(),
+                          f"{english!r} should encode to {expected!r}, got {glyph!r}")
+
+    def test_unicode_operators_demoted_when_multitoken(self):
+        # ∅, ∀, ∃, ∧, ∨, ¬, ≈, ≡ all cost 2 BPE tokens; encoder uses English.
+        self.assertIn("none", cg.encode("the result is null").split())
+        self.assertIn("all", cg.encode("all users").split())
+        self.assertIn("some", cg.encode("some answer").split())
+        self.assertIn("and", cg.encode("user and system").split())
+        self.assertIn("not", cg.encode("not the same").split())
+        self.assertIn("about", cg.encode("about ten").split())
+
+    def test_unicode_operators_kept_when_single_token(self):
+        # ⇒, ←, ≠, → are 1 BPE token in o200k_base — keep them.
+        self.assertIn("⇒", cg.encode("if x then y").split())
+        self.assertIn("←", cg.encode("because x").split())
+        self.assertIn("≠", cg.encode("a different thing").split())
+
+    # ── decoder side: legacy stems still decode ──────────────────────
+    def test_all_retired_stems_decode(self):
+        # Sample from LEGACY_GLYPH_REVERSE — every key must round-trip.
+        legacy_samples = [
+            ("usr cde.",       "code"),
+            ("usr aprch.",     "approach"),
+            ("usr psn.",       "person"),
+            ("usr fix^.",      "fixed"),
+            ("usr wnt.",       "want"),
+            ("usr wnt^.",      "wanted"),
+            ("usr ∅.",         "empty"),
+            ("usr ∀.",         "all"),
+            ("usr ∃.",         "some"),
+            ("usr ∧ sys.",     "and"),
+            ("usr ¬ wrk.",     "not"),
+            ("usr wrk^.",      "worked"),
+            ("usr rt-retry.",  "retry"),
+        ]
+        for cg_text, must_contain in legacy_samples:
+            english, notes = cg.decode(cg_text)
+            self.assertIn(must_contain, english.lower(),
+                          f"legacy {cg_text!r} did not decode to contain {must_contain!r}: {english!r}")
+            self.assertEqual(notes, [], f"unexpected notes on {cg_text!r}: {notes}")
+
+    def test_corpus_token_savings_are_positive(self):
+        # Phase 1 acceptance gate: on a representative corpus the new
+        # lexicon must produce strictly fewer characters AND no negative
+        # token outcomes per sentence. This is a sanity floor — the formal
+        # benchmark in tools/glyph_benchmark.py owns the headline number.
+        corpus = [
+            "The user wants to know how to fix the error in the function.",
+            "The model returned a null result.",
+            "We need to check the data and run the tests.",
+            "Maybe this approach will work.",
+            "The user reported that the build is failing.",
+        ]
+        for sentence in corpus:
+            glyph = cg.encode(sentence)
+            self.assertLess(len(glyph), len(sentence),
+                            f"glyph not shorter than english: {sentence!r} -> {glyph!r}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,2360 @@
+{
+  "tokenizer": "tiktoken o200k_base",
+  "n_entries": 260,
+  "n_changed": 74,
+  "tokens_before_sum": 331,
+  "tokens_after_sum": 250,
+  "sum_pct_saved": 24.5,
+  "by_source": {
+    "stem_kept_tie": 148,
+    "english_preferred": 28,
+    "english_tie": 19,
+    "tense_suffix_dropped": 30,
+    "operator_replaced": 15,
+    "operator_kept": 7,
+    "drop_unchanged": 11,
+    "tense_suffix_kept": 2
+  },
+  "diffs": [
+    {
+      "english": "user",
+      "old_glyph": "usr",
+      "new_glyph": "usr",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "users",
+      "old_glyph": "usr",
+      "new_glyph": "usr",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "system",
+      "old_glyph": "sys",
+      "new_glyph": "sys",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "systems",
+      "old_glyph": "sys",
+      "new_glyph": "sys",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "function",
+      "old_glyph": "fn",
+      "new_glyph": "fn",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "functions",
+      "old_glyph": "fn",
+      "new_glyph": "fn",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "variable",
+      "old_glyph": "var",
+      "new_glyph": "var",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "variables",
+      "old_glyph": "var",
+      "new_glyph": "var",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "value",
+      "old_glyph": "val",
+      "new_glyph": "val",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "values",
+      "old_glyph": "val",
+      "new_glyph": "val",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "context",
+      "old_glyph": "ctx",
+      "new_glyph": "ctx",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "model",
+      "old_glyph": "mdl",
+      "new_glyph": "mdl",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "models",
+      "old_glyph": "mdl",
+      "new_glyph": "mdl",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "data",
+      "old_glyph": "dt",
+      "new_glyph": "dt",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "text",
+      "old_glyph": "txt",
+      "new_glyph": "txt",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "message",
+      "old_glyph": "msg",
+      "new_glyph": "msg",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "messages",
+      "old_glyph": "msg",
+      "new_glyph": "msg",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "error",
+      "old_glyph": "err",
+      "new_glyph": "err",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "errors",
+      "old_glyph": "err",
+      "new_glyph": "err",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "result",
+      "old_glyph": "rs",
+      "new_glyph": "rs",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "results",
+      "old_glyph": "rs",
+      "new_glyph": "rs",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "question",
+      "old_glyph": "q",
+      "new_glyph": "q",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "questions",
+      "old_glyph": "q",
+      "new_glyph": "q",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "answer",
+      "old_glyph": "ans",
+      "new_glyph": "ans",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "answers",
+      "old_glyph": "ans",
+      "new_glyph": "ans",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "code",
+      "old_glyph": "cde",
+      "new_glyph": "code",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "file",
+      "old_glyph": "fl",
+      "new_glyph": "fl",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "files",
+      "old_glyph": "fl",
+      "new_glyph": "fl",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "test",
+      "old_glyph": "tst",
+      "new_glyph": "tst",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "tests",
+      "old_glyph": "tst",
+      "new_glyph": "tst",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "bug",
+      "old_glyph": "bg",
+      "new_glyph": "bg",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "bugs",
+      "old_glyph": "bg",
+      "new_glyph": "bg",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "approach",
+      "old_glyph": "aprch",
+      "new_glyph": "approach",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "way",
+      "old_glyph": "way",
+      "new_glyph": "way",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "thing",
+      "old_glyph": "th",
+      "new_glyph": "th",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "things",
+      "old_glyph": "th",
+      "new_glyph": "th",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "person",
+      "old_glyph": "psn",
+      "new_glyph": "person",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "people",
+      "old_glyph": "psn",
+      "new_glyph": "people",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "time",
+      "old_glyph": "tm",
+      "new_glyph": "tm",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "place",
+      "old_glyph": "pl",
+      "new_glyph": "pl",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "fix",
+      "old_glyph": "fix",
+      "new_glyph": "fix",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "fixes",
+      "old_glyph": "fix",
+      "new_glyph": "fix",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "fixed",
+      "old_glyph": "fix^",
+      "new_glyph": "fixed",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "fixing",
+      "old_glyph": "fix",
+      "new_glyph": "fix",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "add",
+      "old_glyph": "add",
+      "new_glyph": "add",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "adds",
+      "old_glyph": "add",
+      "new_glyph": "add",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "added",
+      "old_glyph": "add^",
+      "new_glyph": "added",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "adding",
+      "old_glyph": "add",
+      "new_glyph": "add",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "delete",
+      "old_glyph": "del",
+      "new_glyph": "del",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "deletes",
+      "old_glyph": "del",
+      "new_glyph": "del",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "deleted",
+      "old_glyph": "del^",
+      "new_glyph": "deleted",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "deleting",
+      "old_glyph": "del",
+      "new_glyph": "del",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "remove",
+      "old_glyph": "del",
+      "new_glyph": "del",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "removes",
+      "old_glyph": "del",
+      "new_glyph": "del",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "removed",
+      "old_glyph": "del^",
+      "new_glyph": "removed",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "removing",
+      "old_glyph": "del",
+      "new_glyph": "del",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "check",
+      "old_glyph": "chk",
+      "new_glyph": "chk",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "checks",
+      "old_glyph": "chk",
+      "new_glyph": "chk",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "checked",
+      "old_glyph": "chk^",
+      "new_glyph": "checked",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "checking",
+      "old_glyph": "chk",
+      "new_glyph": "chk",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "return",
+      "old_glyph": "rt",
+      "new_glyph": "rt",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "returns",
+      "old_glyph": "rt",
+      "new_glyph": "rt",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "returned",
+      "old_glyph": "rt^",
+      "new_glyph": "returned",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "returning",
+      "old_glyph": "rt",
+      "new_glyph": "rt",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "call",
+      "old_glyph": "cl",
+      "new_glyph": "cl",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "calls",
+      "old_glyph": "cl",
+      "new_glyph": "cl",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "called",
+      "old_glyph": "cl^",
+      "new_glyph": "called",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "calling",
+      "old_glyph": "cl",
+      "new_glyph": "cl",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "run",
+      "old_glyph": "run",
+      "new_glyph": "run",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "runs",
+      "old_glyph": "run",
+      "new_glyph": "run",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "ran",
+      "old_glyph": "run^",
+      "new_glyph": "ran",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "running",
+      "old_glyph": "run",
+      "new_glyph": "run",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "build",
+      "old_glyph": "bld",
+      "new_glyph": "build",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "builds",
+      "old_glyph": "bld",
+      "new_glyph": "builds",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "built",
+      "old_glyph": "bld^",
+      "new_glyph": "built",
+      "tokens_before": 3,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "building",
+      "old_glyph": "bld",
+      "new_glyph": "building",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "need",
+      "old_glyph": "nd",
+      "new_glyph": "nd",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "needs",
+      "old_glyph": "nd",
+      "new_glyph": "nd",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "needed",
+      "old_glyph": "nd^",
+      "new_glyph": "needed",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "needing",
+      "old_glyph": "nd",
+      "new_glyph": "nd",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "want",
+      "old_glyph": "wnt",
+      "new_glyph": "want",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "wants",
+      "old_glyph": "wnt",
+      "new_glyph": "wants",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "wanted",
+      "old_glyph": "wnt^",
+      "new_glyph": "wanted",
+      "tokens_before": 3,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "wanting",
+      "old_glyph": "wnt",
+      "new_glyph": "wanting",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "know",
+      "old_glyph": "kn",
+      "new_glyph": "kn",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "knows",
+      "old_glyph": "kn",
+      "new_glyph": "kn",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "knew",
+      "old_glyph": "kn^",
+      "new_glyph": "knew",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "knowing",
+      "old_glyph": "kn",
+      "new_glyph": "kn",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "make",
+      "old_glyph": "mk",
+      "new_glyph": "mk",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "makes",
+      "old_glyph": "mk",
+      "new_glyph": "mk",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "made",
+      "old_glyph": "mk^",
+      "new_glyph": "made",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "making",
+      "old_glyph": "mk",
+      "new_glyph": "mk",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "get",
+      "old_glyph": "gt",
+      "new_glyph": "gt",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "gets",
+      "old_glyph": "gt",
+      "new_glyph": "gt",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "got",
+      "old_glyph": "gt^",
+      "new_glyph": "got",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "getting",
+      "old_glyph": "gt",
+      "new_glyph": "gt",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "give",
+      "old_glyph": "gv",
+      "new_glyph": "gv",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "gives",
+      "old_glyph": "gv",
+      "new_glyph": "gv",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "gave",
+      "old_glyph": "gv^",
+      "new_glyph": "gave",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "giving",
+      "old_glyph": "gv",
+      "new_glyph": "gv",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "take",
+      "old_glyph": "tk",
+      "new_glyph": "tk",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "takes",
+      "old_glyph": "tk",
+      "new_glyph": "tk",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "took",
+      "old_glyph": "tk^",
+      "new_glyph": "took",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "taking",
+      "old_glyph": "tk",
+      "new_glyph": "tk",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "use",
+      "old_glyph": "us",
+      "new_glyph": "us",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "uses",
+      "old_glyph": "us",
+      "new_glyph": "us",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "used",
+      "old_glyph": "us^",
+      "new_glyph": "used",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "using",
+      "old_glyph": "us",
+      "new_glyph": "us",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "find",
+      "old_glyph": "fnd",
+      "new_glyph": "find",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "finds",
+      "old_glyph": "fnd",
+      "new_glyph": "finds",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "found",
+      "old_glyph": "fnd^",
+      "new_glyph": "found",
+      "tokens_before": 3,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "finding",
+      "old_glyph": "fnd",
+      "new_glyph": "finding",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "think",
+      "old_glyph": "thk",
+      "new_glyph": "think",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "thinks",
+      "old_glyph": "thk",
+      "new_glyph": "thinks",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "thought",
+      "old_glyph": "thk^",
+      "new_glyph": "thought",
+      "tokens_before": 3,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "thinking",
+      "old_glyph": "thk",
+      "new_glyph": "thinking",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "do",
+      "old_glyph": "d\u00f8",
+      "new_glyph": "do",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": true
+    },
+    {
+      "english": "does",
+      "old_glyph": "d\u00f8",
+      "new_glyph": "d\u00f8",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "did",
+      "old_glyph": "d\u00f8^",
+      "new_glyph": "did",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "doing",
+      "old_glyph": "d\u00f8",
+      "new_glyph": "d\u00f8",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "say",
+      "old_glyph": "sd",
+      "new_glyph": "sd",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "says",
+      "old_glyph": "sd",
+      "new_glyph": "sd",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "said",
+      "old_glyph": "sd^",
+      "new_glyph": "said",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "saying",
+      "old_glyph": "sd",
+      "new_glyph": "sd",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "see",
+      "old_glyph": "sw",
+      "new_glyph": "sw",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "sees",
+      "old_glyph": "sw",
+      "new_glyph": "sw",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "saw",
+      "old_glyph": "sw^",
+      "new_glyph": "saw",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "seeing",
+      "old_glyph": "sw",
+      "new_glyph": "sw",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "have",
+      "old_glyph": "hv",
+      "new_glyph": "hv",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "has",
+      "old_glyph": "hv",
+      "new_glyph": "hv",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "had",
+      "old_glyph": "hv^",
+      "new_glyph": "had",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "having",
+      "old_glyph": "hv",
+      "new_glyph": "hv",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "go",
+      "old_glyph": "g\u00f8",
+      "new_glyph": "go",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "goes",
+      "old_glyph": "g\u00f8",
+      "new_glyph": "goes",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "went",
+      "old_glyph": "g\u00f8^",
+      "new_glyph": "went",
+      "tokens_before": 3,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "going",
+      "old_glyph": "g\u00f8~",
+      "new_glyph": "going",
+      "tokens_before": 3,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "come",
+      "old_glyph": "cm",
+      "new_glyph": "cm",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "comes",
+      "old_glyph": "cm",
+      "new_glyph": "cm",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "came",
+      "old_glyph": "cm^",
+      "new_glyph": "came",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "coming",
+      "old_glyph": "cm",
+      "new_glyph": "cm",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "fail",
+      "old_glyph": "fail",
+      "new_glyph": "fail",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "fails",
+      "old_glyph": "fail",
+      "new_glyph": "fail",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "failed",
+      "old_glyph": "fail^",
+      "new_glyph": "failed",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "failing",
+      "old_glyph": "fail",
+      "new_glyph": "fail",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "pass",
+      "old_glyph": "pass",
+      "new_glyph": "pass",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "passes",
+      "old_glyph": "pass",
+      "new_glyph": "pass",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "passed",
+      "old_glyph": "pass^",
+      "new_glyph": "passed",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "work",
+      "old_glyph": "wrk",
+      "new_glyph": "work",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "works",
+      "old_glyph": "wrk",
+      "new_glyph": "works",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "worked",
+      "old_glyph": "wrk^",
+      "new_glyph": "worked",
+      "tokens_before": 3,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "working",
+      "old_glyph": "wrk",
+      "new_glyph": "working",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "try",
+      "old_glyph": "try",
+      "new_glyph": "try",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "tries",
+      "old_glyph": "try",
+      "new_glyph": "try",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "tried",
+      "old_glyph": "try^",
+      "new_glyph": "tried",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "tense_suffix_dropped",
+      "changed": true
+    },
+    {
+      "english": "trying",
+      "old_glyph": "try",
+      "new_glyph": "try",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "retry",
+      "old_glyph": "rt-retry",
+      "new_glyph": "retry",
+      "tokens_before": 3,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "good",
+      "old_glyph": "gd",
+      "new_glyph": "gd",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "bad",
+      "old_glyph": "bd",
+      "new_glyph": "bd",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "big",
+      "old_glyph": "bg2",
+      "new_glyph": "big",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "small",
+      "old_glyph": "sm",
+      "new_glyph": "sm",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "fast",
+      "old_glyph": "fst",
+      "new_glyph": "fst",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "slow",
+      "old_glyph": "slw",
+      "new_glyph": "slow",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "hot",
+      "old_glyph": "ht",
+      "new_glyph": "ht",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "cold",
+      "old_glyph": "cd",
+      "new_glyph": "cd",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "new",
+      "old_glyph": "nw",
+      "new_glyph": "nw",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "old",
+      "old_glyph": "ol",
+      "new_glyph": "ol",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "true",
+      "old_glyph": "T",
+      "new_glyph": "T",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "false",
+      "old_glyph": "F",
+      "new_glyph": "F",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "empty",
+      "old_glyph": "\u2205",
+      "new_glyph": "none",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "operator_replaced",
+      "changed": true
+    },
+    {
+      "english": "null",
+      "old_glyph": "\u2205",
+      "new_glyph": "none",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "operator_replaced",
+      "changed": true
+    },
+    {
+      "english": "none",
+      "old_glyph": "\u2205",
+      "new_glyph": "none",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "operator_replaced",
+      "changed": true
+    },
+    {
+      "english": "sure",
+      "old_glyph": "!",
+      "new_glyph": "!",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "yes",
+      "old_glyph": "y",
+      "new_glyph": "y",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "no",
+      "old_glyph": "n",
+      "new_glyph": "n",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "maybe",
+      "old_glyph": "mb",
+      "new_glyph": "mb",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "ok",
+      "old_glyph": "y",
+      "new_glyph": "y",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "all",
+      "old_glyph": "\u2200",
+      "new_glyph": "all",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "operator_replaced",
+      "changed": true
+    },
+    {
+      "english": "every",
+      "old_glyph": "\u2200",
+      "new_glyph": "all",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "operator_replaced",
+      "changed": true
+    },
+    {
+      "english": "some",
+      "old_glyph": "\u2203",
+      "new_glyph": "some",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "operator_replaced",
+      "changed": true
+    },
+    {
+      "english": "any",
+      "old_glyph": "\u2203",
+      "new_glyph": "some",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "operator_replaced",
+      "changed": true
+    },
+    {
+      "english": "many",
+      "old_glyph": "*",
+      "new_glyph": "*",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "much",
+      "old_glyph": "*",
+      "new_glyph": "*",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "more",
+      "old_glyph": "+",
+      "new_glyph": "+",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "less",
+      "old_glyph": "-",
+      "new_glyph": "-",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "and",
+      "old_glyph": "\u2227",
+      "new_glyph": "and",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "operator_replaced",
+      "changed": true
+    },
+    {
+      "english": "or",
+      "old_glyph": "\u2228",
+      "new_glyph": "or",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "operator_replaced",
+      "changed": true
+    },
+    {
+      "english": "not",
+      "old_glyph": "\u00ac",
+      "new_glyph": "not",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "operator_replaced",
+      "changed": true
+    },
+    {
+      "english": "if",
+      "old_glyph": "if",
+      "new_glyph": "if",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "then",
+      "old_glyph": "\u21d2",
+      "new_glyph": "\u21d2",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "operator_kept",
+      "changed": false
+    },
+    {
+      "english": "else",
+      "old_glyph": "el",
+      "new_glyph": "el",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "therefore",
+      "old_glyph": "\u21d2",
+      "new_glyph": "\u21d2",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "operator_kept",
+      "changed": false
+    },
+    {
+      "english": "because",
+      "old_glyph": "\u2190",
+      "new_glyph": "\u2190",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "operator_kept",
+      "changed": false
+    },
+    {
+      "english": "so",
+      "old_glyph": "\u21d2",
+      "new_glyph": "\u21d2",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "operator_kept",
+      "changed": false
+    },
+    {
+      "english": "while",
+      "old_glyph": "wh",
+      "new_glyph": "wh",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "for",
+      "old_glyph": "fr",
+      "new_glyph": "fr",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "about",
+      "old_glyph": "\u2248",
+      "new_glyph": "about",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "operator_replaced",
+      "changed": true
+    },
+    {
+      "english": "approximately",
+      "old_glyph": "\u2248",
+      "new_glyph": "about",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "operator_replaced",
+      "changed": true
+    },
+    {
+      "english": "equal",
+      "old_glyph": "\u2261",
+      "new_glyph": "eq",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "operator_replaced",
+      "changed": true
+    },
+    {
+      "english": "equals",
+      "old_glyph": "\u2261",
+      "new_glyph": "eq",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "operator_replaced",
+      "changed": true
+    },
+    {
+      "english": "same",
+      "old_glyph": "\u2261",
+      "new_glyph": "eq",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "operator_replaced",
+      "changed": true
+    },
+    {
+      "english": "different",
+      "old_glyph": "\u2260",
+      "new_glyph": "\u2260",
+      "tokens_before": 2,
+      "tokens_after": 2,
+      "source": "operator_kept",
+      "changed": false
+    },
+    {
+      "english": "i",
+      "old_glyph": "i",
+      "new_glyph": "i",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "me",
+      "old_glyph": "i",
+      "new_glyph": "i",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "my",
+      "old_glyph": "i",
+      "new_glyph": "i",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "you",
+      "old_glyph": "u",
+      "new_glyph": "u",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "your",
+      "old_glyph": "u",
+      "new_glyph": "u",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "we",
+      "old_glyph": "w",
+      "new_glyph": "w",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "us",
+      "old_glyph": "w",
+      "new_glyph": "w",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "our",
+      "old_glyph": "w",
+      "new_glyph": "w",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "they",
+      "old_glyph": "t",
+      "new_glyph": "t",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "them",
+      "old_glyph": "t",
+      "new_glyph": "t",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "their",
+      "old_glyph": "t",
+      "new_glyph": "t",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "it",
+      "old_glyph": "x",
+      "new_glyph": "x",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "its",
+      "old_glyph": "x",
+      "new_glyph": "x",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "this",
+      "old_glyph": "x",
+      "new_glyph": "x",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "that",
+      "old_glyph": "x",
+      "new_glyph": "x",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "he",
+      "old_glyph": "p",
+      "new_glyph": "p",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "she",
+      "old_glyph": "p",
+      "new_glyph": "p",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "him",
+      "old_glyph": "p",
+      "new_glyph": "p",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "her",
+      "old_glyph": "p",
+      "new_glyph": "p",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "is",
+      "old_glyph": "",
+      "new_glyph": "",
+      "tokens_before": 0,
+      "tokens_after": 0,
+      "source": "drop_unchanged",
+      "changed": false
+    },
+    {
+      "english": "are",
+      "old_glyph": "",
+      "new_glyph": "",
+      "tokens_before": 0,
+      "tokens_after": 0,
+      "source": "drop_unchanged",
+      "changed": false
+    },
+    {
+      "english": "was",
+      "old_glyph": "",
+      "new_glyph": "",
+      "tokens_before": 0,
+      "tokens_after": 0,
+      "source": "drop_unchanged",
+      "changed": false
+    },
+    {
+      "english": "were",
+      "old_glyph": "",
+      "new_glyph": "",
+      "tokens_before": 0,
+      "tokens_after": 0,
+      "source": "drop_unchanged",
+      "changed": false
+    },
+    {
+      "english": "be",
+      "old_glyph": "",
+      "new_glyph": "",
+      "tokens_before": 0,
+      "tokens_after": 0,
+      "source": "drop_unchanged",
+      "changed": false
+    },
+    {
+      "english": "been",
+      "old_glyph": "",
+      "new_glyph": "",
+      "tokens_before": 0,
+      "tokens_after": 0,
+      "source": "drop_unchanged",
+      "changed": false
+    },
+    {
+      "english": "being",
+      "old_glyph": "",
+      "new_glyph": "",
+      "tokens_before": 0,
+      "tokens_after": 0,
+      "source": "drop_unchanged",
+      "changed": false
+    },
+    {
+      "english": "am",
+      "old_glyph": "",
+      "new_glyph": "",
+      "tokens_before": 0,
+      "tokens_after": 0,
+      "source": "drop_unchanged",
+      "changed": false
+    },
+    {
+      "english": "will",
+      "old_glyph": "~",
+      "new_glyph": "~",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "tense_suffix_kept",
+      "changed": false
+    },
+    {
+      "english": "shall",
+      "old_glyph": "~",
+      "new_glyph": "~",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "tense_suffix_kept",
+      "changed": false
+    },
+    {
+      "english": "should",
+      "old_glyph": "?",
+      "new_glyph": "?",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "would",
+      "old_glyph": "?",
+      "new_glyph": "?",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "could",
+      "old_glyph": "?",
+      "new_glyph": "?",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "may",
+      "old_glyph": "?",
+      "new_glyph": "?",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "might",
+      "old_glyph": "?",
+      "new_glyph": "?",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "must",
+      "old_glyph": "!",
+      "new_glyph": "!",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "can",
+      "old_glyph": "?",
+      "new_glyph": "?",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "a",
+      "old_glyph": "",
+      "new_glyph": "",
+      "tokens_before": 0,
+      "tokens_after": 0,
+      "source": "drop_unchanged",
+      "changed": false
+    },
+    {
+      "english": "an",
+      "old_glyph": "",
+      "new_glyph": "",
+      "tokens_before": 0,
+      "tokens_after": 0,
+      "source": "drop_unchanged",
+      "changed": false
+    },
+    {
+      "english": "the",
+      "old_glyph": "",
+      "new_glyph": "",
+      "tokens_before": 0,
+      "tokens_after": 0,
+      "source": "drop_unchanged",
+      "changed": false
+    },
+    {
+      "english": "in",
+      "old_glyph": "in",
+      "new_glyph": "in",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "on",
+      "old_glyph": "on",
+      "new_glyph": "on",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "at",
+      "old_glyph": "at",
+      "new_glyph": "at",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "to",
+      "old_glyph": "to",
+      "new_glyph": "to",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "from",
+      "old_glyph": "fm",
+      "new_glyph": "fm",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "with",
+      "old_glyph": "w/",
+      "new_glyph": "with",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "without",
+      "old_glyph": "w/o",
+      "new_glyph": "without",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "by",
+      "old_glyph": "by",
+      "new_glyph": "by",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "of",
+      "old_glyph": "of",
+      "new_glyph": "of",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "into",
+      "old_glyph": "\u2192",
+      "new_glyph": "\u2192",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "operator_kept",
+      "changed": false
+    },
+    {
+      "english": "onto",
+      "old_glyph": "\u2192",
+      "new_glyph": "\u2192",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "operator_kept",
+      "changed": false
+    },
+    {
+      "english": "how",
+      "old_glyph": "how",
+      "new_glyph": "how",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "what",
+      "old_glyph": "wht",
+      "new_glyph": "what",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "why",
+      "old_glyph": "why",
+      "new_glyph": "why",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "when",
+      "old_glyph": "wn",
+      "new_glyph": "wn",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "where",
+      "old_glyph": "wr",
+      "new_glyph": "wr",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "who",
+      "old_glyph": "who",
+      "new_glyph": "who",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "english_tie",
+      "changed": false
+    },
+    {
+      "english": "which",
+      "old_glyph": "wch",
+      "new_glyph": "which",
+      "tokens_before": 2,
+      "tokens_after": 1,
+      "source": "english_preferred",
+      "changed": true
+    },
+    {
+      "english": "very",
+      "old_glyph": "*",
+      "new_glyph": "*",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    },
+    {
+      "english": "really",
+      "old_glyph": "*",
+      "new_glyph": "*",
+      "tokens_before": 1,
+      "tokens_after": 1,
+      "source": "stem_kept_tie",
+      "changed": false
+    }
+  ]
+}

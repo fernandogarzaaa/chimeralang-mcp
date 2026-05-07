@@ -19,25 +19,25 @@ import re
 # ── grammar spec (shipped to the AI as part of the directive) ────────────────
 
 GRAMMAR_SPEC = """\
-CHIMERA GLYPH (CG) — token-efficient AI language.
+CHIMERA GLYPH (CG) — token-efficient AI language, BPE-aligned.
 
 CORE RULES
   1. No articles: drop "a", "an", "the".
   2. No copulas: "is/are/was" implicit by juxtaposition. ("x red" = "x is red")
-  3. SVO order. No inflection. Tense / modality markers may be attached
-     as a single trailing suffix on a verb OR emitted as a standalone
-     token immediately before the verb (both forms decode the same):
-       ^ past        ~ future / will        ? might / uncertain
-       ! must / certain                     (no marker) = present
-     Do NOT stack markers (e.g. `wrk~?`) or fuse them with operators
-     (e.g. `¬!`) — emit each as its own token.
+  3. SVO order. Tense / modality emitted as a standalone token before the
+     verb (the suffix scheme `wrk^` was retired in 0.7.3 because most
+     suffix forms cost +1-2 BPE tokens vs the plain English past tense):
+       ~ future / will        ? might / uncertain
+       ! must / certain       (no marker) = present
+     Past tense uses the English form directly: "fixed", "ran", "built".
+     Do NOT stack markers (`~?`) or fuse them with operators (`¬!`) —
+     emit each as its own token.
   4. Pronouns collapse: i, u, w (we), t (they), x (it/this).
-  5. Logical operators (each is typically 1 token):
-       →  causes/implies        ⇒  therefore
-       ∧  and                   ∨  or
-       ¬  not                   ≈  about/similar
-       ≠  not-equal             ≡  equivalent
-       ∃  some                  ∀  all
+  5. Logical operators (each verified 1 BPE token in o200k_base):
+       ⇒  therefore / then     ←  because
+       ≠  not-equal            →  to / into
+     Connectives that cost 2+ tokens as Unicode were demoted to English:
+       and, or, not, all, some, about, equal, none.
   6. Sigil prefixes disambiguate roles:
        @  entity (proper noun, file path, identifier — preserved verbatim)
        #  concept/topic         $  action
@@ -46,39 +46,39 @@ CORE RULES
   8. Sentence terminator: "." (newline also terminates).
   9. Out-of-lexicon words pass through prefixed with @ (entity sigil).
 
-LEXICON (English -> CG stem):
+LEXICON HINTS (English -> CG stem; only listing the substitutions —
+unlisted words encode to themselves):
   user=usr  system=sys  function=fn  variable=var  value=val
   context=ctx  model=mdl  data=dt  text=txt  message=msg
-  error=err  result=rs  question=q  answer=ans  code=cde
-  file=fl  test=tst  bug=bg  fix=fix  add=add  delete=del
-  check=chk  return=rt  call=cl  run=run  build=bld
-  need=nd  want=wnt  know=kn  make=mk  get=gt  give=gv
-  take=tk  go=gø  come=cm  use=us  find=fnd  think=thk
-  do=dø  say=sd  see=sw  have=hv  is=  are=  was=  were=
-  yes=y  no=n  maybe=mb  good=gd  bad=bd  big=bg2  small=sm
-  fast=fst  slow=slw  hot=ht  cold=cd  new=nw  old=ol
-  true=T  false=F  null=∅  empty=∅
-  if=if  then=⇒  else=el  while=wh  for=fr  return=rt
+  error=err  result=rs  question=q  answer=ans
+  file=fl  test=tst  bug=bg  delete=del  check=chk  return=rt
+  call=cl  need=nd  know=kn  make=mk  get=gt  give=gv
+  take=tk  use=us  come=cm  say=sd  see=sw  have=hv
+  is=  are=  was=  the=  a=  an=
+  yes=y  no=n  maybe=mb  good=gd  bad=bd  small=sm  fast=fst
+  hot=ht  cold=cd  new=nw  old=ol  true=T  false=F
+  while=wh  for=fr  from=fm  when=wn  where=wr
 
-EXAMPLES
+EXAMPLES (round-trip safe under decode())
   EN: "The user wants to know how to fix the error in the function."
-  CG: "usr wnt kn fix err in fn."
+  CG: "usr wants kn fix err in fn."
 
   EN: "If the test fails, then we should retry it."
-  CG: "if tst fail ⇒ w ? rt-retry x."
+  CG: "if tst fail ⇒ w ? retry x."
 
   EN: "Maybe this approach will work."
-  CG: "mb aprch wrk~."
+  CG: "mb x approach ~ work."
 
   EN: "The model returned a null result."
-  CG: "mdl rt^ ∅ rs."
+  CG: "mdl returned none rs."
 """
 
 
 # ── lexicon: English content-word -> CG stem ─────────────────────────────────
 
 LEXICON: dict[str, str] = {
-    # nouns
+    # nouns — most common English words are 1-token in BPE; only short
+    # abbreviations that are also 1-token actually save anything.
     "user": "usr", "users": "usr",
     "system": "sys", "systems": "sys",
     "function": "fn", "functions": "fn",
@@ -93,70 +93,80 @@ LEXICON: dict[str, str] = {
     "result": "rs", "results": "rs",
     "question": "q", "questions": "q",
     "answer": "ans", "answers": "ans",
-    "code": "cde",
+    "code": "code",                                       # was "cde" (2 BPE tokens)
     "file": "fl", "files": "fl",
     "test": "tst", "tests": "tst",
     "bug": "bg", "bugs": "bg",
-    "approach": "aprch",
+    "approach": "approach",                               # was "aprch" (2 BPE tokens)
     "way": "way",
     "thing": "th", "things": "th",
-    "person": "psn", "people": "psn",
+    "person": "person", "people": "people",               # was "psn" (2 BPE tokens)
     "time": "tm",
     "place": "pl",
-    # verbs (lemma)
-    "fix": "fix", "fixes": "fix", "fixed": "fix^", "fixing": "fix",
-    "add": "add", "adds": "add", "added": "add^", "adding": "add",
-    "delete": "del", "deletes": "del", "deleted": "del^", "deleting": "del",
-    "remove": "del", "removes": "del", "removed": "del^", "removing": "del",
-    "check": "chk", "checks": "chk", "checked": "chk^", "checking": "chk",
-    "return": "rt", "returns": "rt", "returned": "rt^", "returning": "rt",
-    "call": "cl", "calls": "cl", "called": "cl^", "calling": "cl",
-    "run": "run", "runs": "run", "ran": "run^", "running": "run",
-    "build": "bld", "builds": "bld", "built": "bld^", "building": "bld",
-    "need": "nd", "needs": "nd", "needed": "nd^", "needing": "nd",
-    "want": "wnt", "wants": "wnt", "wanted": "wnt^", "wanting": "wnt",
-    "know": "kn", "knows": "kn", "knew": "kn^", "knowing": "kn",
-    "make": "mk", "makes": "mk", "made": "mk^", "making": "mk",
-    "get": "gt", "gets": "gt", "got": "gt^", "getting": "gt",
-    "give": "gv", "gives": "gv", "gave": "gv^", "giving": "gv",
-    "take": "tk", "takes": "tk", "took": "tk^", "taking": "tk",
-    "use": "us", "uses": "us", "used": "us^", "using": "us",
-    "find": "fnd", "finds": "fnd", "found": "fnd^", "finding": "fnd",
-    "think": "thk", "thinks": "thk", "thought": "thk^", "thinking": "thk",
-    "do": "dø", "does": "dø", "did": "dø^", "doing": "dø",
-    "say": "sd", "says": "sd", "said": "sd^", "saying": "sd",
-    "see": "sw", "sees": "sw", "saw": "sw^", "seeing": "sw",
-    "have": "hv", "has": "hv", "had": "hv^", "having": "hv",
-    "go": "gø", "goes": "gø", "went": "gø^", "going": "gø~",
-    "come": "cm", "comes": "cm", "came": "cm^", "coming": "cm",
-    "fail": "fail", "fails": "fail", "failed": "fail^", "failing": "fail",
-    "pass": "pass", "passes": "pass", "passed": "pass^",
-    "work": "wrk", "works": "wrk", "worked": "wrk^", "working": "wrk",
-    "try": "try", "tries": "try", "tried": "try^", "trying": "try",
-    "retry": "rt-retry",
+    # verbs — present/lemma forms (suffix scheme dropped, see past-tense block)
+    "fix": "fix", "fixes": "fix", "fixing": "fix",
+    "add": "add", "adds": "add", "adding": "add",
+    "delete": "del", "deletes": "del", "deleting": "del",
+    "remove": "del", "removes": "del", "removing": "del",
+    "check": "chk", "checks": "chk", "checking": "chk",
+    "return": "rt", "returns": "rt", "returning": "rt",
+    "call": "cl", "calls": "cl", "calling": "cl",
+    "run": "run", "runs": "run", "running": "run",
+    "build": "build", "builds": "builds", "building": "building",  # was "bld" (2 BPE tokens)
+    "need": "nd", "needs": "nd", "needing": "nd",
+    "want": "want", "wants": "wants", "wanting": "wanting",        # was "wnt" (2 BPE tokens)
+    "know": "kn", "knows": "kn", "knowing": "kn",
+    "make": "mk", "makes": "mk", "making": "mk",
+    "get": "gt", "gets": "gt", "getting": "gt",
+    "give": "gv", "gives": "gv", "giving": "gv",
+    "take": "tk", "takes": "tk", "taking": "tk",
+    "use": "us", "uses": "us", "using": "us",
+    "find": "find", "finds": "finds", "finding": "finding",        # was "fnd" (2 BPE tokens)
+    "think": "think", "thinks": "thinks", "thinking": "thinking",  # was "thk" (2 BPE tokens)
+    "do": "do", "does": "dø", "doing": "dø",
+    "say": "sd", "says": "sd", "saying": "sd",
+    "see": "sw", "sees": "sw", "seeing": "sw",
+    "have": "hv", "has": "hv", "having": "hv",
+    "go": "go", "goes": "goes", "going": "going",                  # was "gø/gø~" (multi-token)
+    "come": "cm", "comes": "cm", "coming": "cm",
+    "fail": "fail", "fails": "fail", "failing": "fail",
+    "pass": "pass", "passes": "pass",
+    "work": "work", "works": "works", "working": "working",        # was "wrk" (2 BPE tokens)
+    "try": "try", "tries": "try", "trying": "try",
+    "retry": "retry",                                              # was "rt-retry" (3 BPE tokens)
+    # past-tense — English wins; the suffix scheme (`fix^`, `wnt^`) cost +1-2 tokens.
+    "fixed": "fixed", "added": "added", "deleted": "deleted",
+    "removed": "removed", "checked": "checked", "returned": "returned",
+    "called": "called", "ran": "ran", "built": "built",
+    "needed": "needed", "wanted": "wanted", "knew": "knew",
+    "made": "made", "got": "got", "gave": "gave", "took": "took",
+    "used": "used", "found": "found", "thought": "thought",
+    "did": "did", "said": "said", "saw": "saw", "had": "had",
+    "went": "went", "came": "came", "failed": "failed",
+    "passed": "passed", "worked": "worked", "tried": "tried",
     # adjectives
     "good": "gd", "bad": "bd",
-    "big": "bg2", "small": "sm",
-    "fast": "fst", "slow": "slw",
+    "big": "big", "small": "sm",
+    "fast": "fst", "slow": "slow",
     "hot": "ht", "cold": "cd",
     "new": "nw", "old": "ol",
     "true": "T", "false": "F",
-    "empty": "∅", "null": "∅", "none": "∅",
+    "empty": "none", "null": "none", "none": "none",   # ∅ was 2 BPE tokens
     "sure": "!",
     # answers / discourse
     "yes": "y", "no": "n", "maybe": "mb", "ok": "y",
     # quantifiers
-    "all": "∀", "every": "∀",
-    "some": "∃", "any": "∃",
+    "all": "all", "every": "all",                      # ∀ was 2 BPE tokens
+    "some": "some", "any": "some",                     # ∃ was 2 BPE tokens
     "many": "*", "much": "*",
     "more": "+", "less": "-",
-    # connectives
-    "and": "∧", "or": "∨", "not": "¬",
-    "if": "if", "then": "⇒", "else": "el", "therefore": "⇒",
-    "because": "←", "so": "⇒",
+    # connectives — English wins for the bigrams; ⇒ / ← / ≠ stay (1-token Unicode).
+    "and": "and", "or": "or", "not": "not",            # ∧/∨/¬ were 2 BPE tokens
+    "if": "if", "then": "⇒", "else": "el",
+    "therefore": "⇒", "because": "←", "so": "⇒",
     "while": "wh", "for": "fr",
-    "about": "≈", "approximately": "≈",
-    "equal": "≡", "equals": "≡", "same": "≡",
+    "about": "about", "approximately": "about",        # ≈ was 2 BPE tokens
+    "equal": "eq", "equals": "eq", "same": "eq",       # ≡ was 2 BPE tokens
     "different": "≠",
     # pronouns
     "i": "i", "me": "i", "my": "i",
@@ -167,22 +177,56 @@ LEXICON: dict[str, str] = {
     "he": "p", "she": "p", "him": "p", "her": "p",
     # auxiliaries (dropped in CG; mapped to "" so encoder skips them)
     "is": "", "are": "", "was": "", "were": "", "be": "", "been": "", "being": "",
-    "am": "", "do": "dø", "does": "dø", "did": "dø^",
-    "have": "hv", "has": "hv", "had": "hv^",
+    "am": "",
     "will": "~", "shall": "~",
     "should": "?", "would": "?", "could": "?", "may": "?", "might": "?",
     "must": "!",
     "can": "?",
     # articles (dropped)
     "a": "", "an": "", "the": "",
-    # prepositions (mostly preserved short)
+    # prepositions
     "in": "in", "on": "on", "at": "at", "to": "to", "from": "fm",
-    "with": "w/", "without": "w/o", "by": "by", "of": "of", "for": "fr",
+    "with": "with", "without": "without",              # were "w/", "w/o" (multi-token)
+    "by": "by", "of": "of",
     "into": "→", "onto": "→",
     # misc
-    "how": "how", "what": "wht", "why": "why", "when": "wn", "where": "wr",
-    "who": "who", "which": "wch",
+    "how": "how", "what": "what", "why": "why",        # "wht" was 2 BPE tokens
+    "when": "wn", "where": "wr",
+    "who": "who", "which": "which",                    # "wch" was 2 BPE tokens
     "very": "*", "really": "*",
+}
+
+
+# Legacy stems retained for decoder backwards compatibility. CG text emitted
+# by chimeralang-mcp ≤ 0.7.2 may contain these forms; the decoder must still
+# map them to plausible English. The encoder no longer emits them — see
+# tools/lexicon_diff.json for the full migration record.
+LEGACY_GLYPH_REVERSE: dict[str, str] = {
+    # noun stems retired (BPE multi-token)
+    "cde": "code", "aprch": "approach", "psn": "person",
+    # past-tense suffix forms retired
+    "fix^": "fixed", "add^": "added", "del^": "deleted",
+    "chk^": "checked", "rt^": "returned", "cl^": "called",
+    "run^": "ran", "bld": "build", "bld^": "built",
+    "nd^": "needed", "wnt": "want", "wnt^": "wanted",
+    "kn^": "knew", "mk^": "made", "gt^": "got",
+    "gv^": "gave", "tk^": "took", "us^": "used",
+    "fnd": "find", "fnd^": "found",
+    "thk": "think", "thk^": "thought",
+    "dø^": "did", "sd^": "said", "sw^": "saw", "hv^": "had",
+    "gø": "go", "gø^": "went", "gø~": "going",
+    "cm^": "came", "fail^": "failed", "pass^": "passed",
+    "wrk": "work", "wrk^": "worked",
+    "try^": "tried", "rt-retry": "retry",
+    # adjective stems retired
+    "bg2": "big", "slw": "slow",
+    # operator stems retired (Unicode multi-token)
+    "∅": "empty", "∀": "all", "∃": "some",
+    "∧": "and", "∨": "or", "¬": "not",
+    "≈": "about", "≡": "equal",
+    # misc retired
+    "wht": "what", "wch": "which",
+    "w/": "with", "w/o": "without",
 }
 
 
@@ -204,12 +248,16 @@ OPERATORS: dict[str, str] = {
 
 
 # auto-built reverse lexicon: CG stem -> English (first English mapping wins)
+# Order matters: we layer the current LEXICON on top of LEGACY_GLYPH_REVERSE so
+# new mappings win for any stem the encoder still emits, while legacy stems
+# (no longer produced by encode()) remain decodable.
 def _build_reverse_lexicon() -> dict[str, str]:
-    rev: dict[str, str] = {}
+    rev: dict[str, str] = dict(LEGACY_GLYPH_REVERSE)
     for eng, cg in LEXICON.items():
         if not cg:
             continue
-        # prefer the shortest / lemma-form English
+        # Prefer the shortest / lemma-form English when multiple English words
+        # collide on the same stem.
         if cg not in rev or len(eng) < len(rev[cg]):
             rev[cg] = eng
     return rev
