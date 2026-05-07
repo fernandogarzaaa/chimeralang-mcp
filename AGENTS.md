@@ -1,6 +1,6 @@
 # Codex Agent Guide — chimeralang-mcp
 
-> **chimera_version: 0.7.1** — keep this in sync with `pyproject.toml` and `.claude/skills/chimera/SKILL.md`.
+> **chimera_version: 0.7.2** — keep this in sync with `pyproject.toml` and `.claude/skills/chimera/SKILL.md`.
 
 This file is the Codex-readable adapter of the **chimera skill**. The canonical version lives at `.claude/skills/chimera/SKILL.md`; this is the same routing matrix in the location Codex actually walks.
 
@@ -10,7 +10,7 @@ When Codex is operating inside this repository, follow these rules.
 
 ## When to invoke chimeralang-mcp
 
-The chimeralang-mcp server (currently `0.7.1`) exposes 51 tools. Pick the smallest correct subset for the user's actual intent — never invoke all of them.
+The chimeralang-mcp server (currently `0.7.2`) exposes 51 tools. Pick the smallest correct subset for the user's actual intent — never invoke all of them.
 
 **Skip chimera tools entirely** if:
 - Prompt is `< 200` chars and has no attached document/log/history.
@@ -46,7 +46,7 @@ The chimeralang-mcp server (currently `0.7.1`) exposes 51 tools. Pick the smalle
 | `chimera_log_compress` | `text="<log content>"` | `log="..."` — param is `text`, not `log` |
 | `chimera_optimize` | `preserve_code=true` (JSON bool) | `preserve_code="true"` (string rejected) |
 | `chimera_cost_track` | `tokens_saved=265` (integer) | `tokens_saved="265"` (string rejected) |
-| `chimera_mode` | `task_description="..."` | `task_type="..."` (handler reads `task_description`) |
+| `chimera_mode` | `task_description="..."` | `task_type="..."` (unknown args silently dropped) |
 | `chimera_glyph_translate` | `verbosity="terse"` or `"natural"` | any other string → falls back to `"natural"` |
 | `chimera_batch` | `operations=[{"tool": "chimera_optimize", "arguments": {...}}]` | flat args |
 
@@ -156,14 +156,14 @@ Skip any step that would cost more tokens than it saves.
 | `avg_pct_saved` | > 70% | Healthy — add `chimera_cache_mark` on stable system blocks |
 | Dedup hits | > 2 in session | Wrap repeated calls in `chimera_batch` |
 | Session savings | > $0.01 | Record for ROI evidence via `chimera_dashboard` |
-| `chimera_cost_track` returns `UnboundLocalError` | — | Known false-negative — entry IS persisted; verify via `chimera_dashboard` |
+| `chimera_cost_track` errors | — | Fixed in `0.7.2`; on older versions the entry persists despite the error |
 
 ---
 
 ## Project-specific Codex notes
 
 - **Branch convention.** All new development for AI coding agents in this repo lives on `claude/<task-slug>` or `docs/<task-slug>` branches. Never push directly to `main`. Open a PR.
-- **Tests.** `python -m pytest -q` from repo root. 206 tests pass on `main` as of `0.7.1`. Don't ship a change that drops that count.
+- **Tests.** `python -m pytest -q` from repo root. 222 tests pass on `main` as of `0.7.2`. Don't ship a change that drops that count.
 - **Release pipeline.** Merging to `main` triggers `.github/workflows/publish.yml` which uploads to PyPI via OIDC Trusted Publishing. Bump `pyproject.toml` AND `chimeralang_mcp/__init__.py` together.
 - **Code style.** No new dependencies in the language module (`chimeralang_mcp/ai_language.py` is stdlib-only). Match existing patterns in `server.py` rather than refactoring.
 
