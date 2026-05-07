@@ -2,33 +2,31 @@
 
 ## Token-saving policy (always active)
 
-Before processing large documents, conversation histories, or code blobs, always use these MCP tools to stay within token budgets:
+The canonical routing rules — which `chimera_*` tool to invoke for each prompt pattern, calling conventions, mode selection, worked examples, and skip conditions — live at:
 
-1. **`chimera_optimize`** — Compress a raw text/code block to ~2–5% of its original size via structural + entity + frequency extraction. Use on any document > 500 chars before including it in context.
+- **`.claude/skills/chimera/SKILL.md`** — for Claude Code (auto-loaded as a skill)
+- **`AGENTS.md`** — for Codex (same routing matrix at repo root)
 
-2. **`chimera_compress`** — Proportionally truncate a message history list to fit a token budget. Use when passing conversation history to a model call.
+Both files are kept in sync via `tests/test_skill_integrity.py`. Treat the SKILL.md routing matrix as binding for non-trivial tasks; skip chimera tools for prompts < 200 chars with no attachments.
 
-3. **`chimera_fracture`** — Full pipeline: runs `chimera_optimize` on each document AND `chimera_compress` on messages in one call, with a quality gate. Prefer this over calling the two tools separately when you have both documents and messages.
-
-### When to apply
+### Quick reference
 
 | Situation | Tool |
 |-----------|------|
 | Single large doc/code blob | `chimera_optimize` |
 | Long conversation history | `chimera_compress` |
 | Both docs + messages | `chimera_fracture` |
-| Build/test/install logs | `chimera_log_compress` (errors verbatim, body abridged) |
-| Stable system blocks for an Anthropic SDK call | `chimera_cache_mark` (lossless 75–90% off via prompt cache) |
-| Recurring per-turn cost surfacing | `chimera_overhead_audit` |
-| Inspect repeated tool calls | `chimera_dedup_lookup` |
+| Build/test/install logs | `chimera_log_compress` |
+| Stable system blocks for an Anthropic SDK call | `chimera_cache_mark` |
 | End-of-session totals | `chimera_session_report` |
-| Quick inline text (< 200 chars) | skip |
+
+For everything else (reasoning lane, glyph lane, long tail, telemetry reactions), see `.claude/skills/chimera/SKILL.md`.
 
 ### Hook coverage
 
 The token tools fire automatically via `.claude/settings.json`:
 
-- **SessionStart** — emits the policy above as `additionalContext`.
+- **SessionStart** — emits the policy as `additionalContext`.
 - **UserPromptSubmit** — auto-compresses prompts > 800 chars.
 - **PreToolUse** — warns on duplicate tool calls (dedup hit) and on `Edit`/`Write`/`Bash` payloads > 4000 chars.
 - **PostToolUse** — records every non-chimera tool call into the dedup cache and nudges when responses > 2000 chars.
