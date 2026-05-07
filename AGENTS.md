@@ -1,5 +1,7 @@
 # Codex Agent Guide — chimeralang-mcp
 
+> **chimera_version: 0.7.1** — keep this in sync with `pyproject.toml` and `.claude/skills/chimera/SKILL.md`.
+
 This file is the Codex-readable adapter of the **chimera skill**. The canonical version lives at `.claude/skills/chimera/SKILL.md`; this is the same routing matrix in the location Codex actually walks.
 
 When Codex is operating inside this repository, follow these rules.
@@ -37,6 +39,19 @@ The chimeralang-mcp server (currently `0.7.1`) exposes 51 tools. Pick the smalle
 
 ---
 
+## Calling conventions — exact arg names and types
+
+| Tool | Correct call | Wrong call |
+|---|---|---|
+| `chimera_log_compress` | `text="<log content>"` | `log="..."` — param is `text`, not `log` |
+| `chimera_optimize` | `preserve_code=true` (JSON bool) | `preserve_code="true"` (string rejected) |
+| `chimera_cost_track` | `tokens_saved=265` (integer) | `tokens_saved="265"` (string rejected) |
+| `chimera_mode` | `task_description="..."` | `task_type="..."` (handler reads `task_description`) |
+| `chimera_glyph_translate` | `verbosity="terse"` or `"natural"` | any other string → falls back to `"natural"` |
+| `chimera_batch` | `operations=[{"tool": "chimera_optimize", "arguments": {...}}]` | flat args |
+
+---
+
 ## Reasoning lane — verification, deliberation, claims
 
 | Trigger | First-choice tool |
@@ -63,6 +78,11 @@ For internal reasoning the user will not directly read:
 2. The agent produces output in Chimera Glyph (CG).
 3. `chimera_glyph_translate(glyph_text=<output>, verbosity="natural")` → recover English at the boundary.
 
+**Worked example:**
+- English: *"The user wants to know how to fix the error returned by the function."* (14 tokens)
+- CG: `usr wnt kn fix err $rt fn.` (≈8 tokens)
+- Decoded: *"User wants know fix error return function."*
+
 Measured: 46.2% token reduction on a 10-sentence corpus, 0.11 ms/sentence end-to-end. See `docs/case-studies/chimera-glyph-feature.md` for the benchmark.
 
 ---
@@ -82,6 +102,39 @@ Auto-detect via `chimera_mode(task_description="...")`. Keywords *compress/budge
 
 ---
 
+## Worked examples — prompt → tool sequence
+
+**1. Summarize a large design doc**
+```
+chimera_csm → chimera_mode(task_description="summarize design doc")
+→ chimera_optimize(text=<doc>, preserve_code=false) → chimera_summarize(text=<compressed>)
+```
+
+**2. Diagnose a failing CI log**
+```
+chimera_csm → chimera_log_compress(text=<log>) → answer from compressed output
+```
+
+**3. Multi-perspective analysis**
+```
+chimera_csm → chimera_mode(task_description="analyze competing designs")
+→ chimera_deliberate(...) → chimera_gate(candidates=[...])
+```
+
+**4. Claim verification**
+```
+chimera_csm → chimera_claims(text=<claim>) → chimera_verify(claims=[...], evidence=<source>)
+→ chimera_detect(text=<claim>)
+```
+
+**5. AI-to-AI compressed reasoning**
+```
+chimera_glyph_directive(style="strict", task_hint=<task>)
+→ [agent emits CG] → chimera_glyph_translate(glyph_text=<CG>, verbosity="natural")
+```
+
+---
+
 ## Enforcement checklist (start of any non-trivial task)
 
 1. `chimera_csm` — first call on every message with a payload.
@@ -92,6 +145,18 @@ Auto-detect via `chimera_mode(task_description="...")`. Keywords *compress/budge
 6. End of work → `chimera_session_report` (or let the Stop hook fire it).
 
 Skip any step that would cost more tokens than it saves.
+
+---
+
+## Telemetry reaction matrix
+
+| Signal | Threshold | Action |
+|---|---|---|
+| `avg_pct_saved` | < 30% | Inputs too short — check skip conditions; avoid chimera on sub-200-char prompts |
+| `avg_pct_saved` | > 70% | Healthy — add `chimera_cache_mark` on stable system blocks |
+| Dedup hits | > 2 in session | Wrap repeated calls in `chimera_batch` |
+| Session savings | > $0.01 | Record for ROI evidence via `chimera_dashboard` |
+| `chimera_cost_track` returns `UnboundLocalError` | — | Known false-negative — entry IS persisted; verify via `chimera_dashboard` |
 
 ---
 

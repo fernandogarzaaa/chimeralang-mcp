@@ -1,6 +1,7 @@
 ---
 name: chimera
-description: Use when a prompt involves a long document or log, a conversation history that needs trimming, AI-to-AI reasoning with token cost concerns, claim verification or hallucination detection, multi-tool batched work, or any task whose intent maps onto the chimeralang-mcp tool surface. Enforces use of the right `chimera_*` tool for the job and skips chimera tools entirely for trivial inputs.
+chimera_version: "0.7.1"
+description: "Trigger: large document (>500 chars), build/test log, long conversation history, claim-checking, hallucination detection, multi-tool batch, or token-cost concerns. Routes each request to the smallest correct chimera_* tool subset and skips chimera entirely for prompts <200 chars with no attachments."
 ---
 
 # Chimera skill — smart routing into chimeralang-mcp
@@ -38,6 +39,21 @@ The chimeralang-mcp server (currently `0.7.1`) exposes 51 tools. Routing all of 
 
 ---
 
+## Calling conventions — exact arg names and types
+
+Common mistakes that cause tool errors:
+
+| Tool | Correct call | Wrong call |
+|---|---|---|
+| `chimera_log_compress` | `text="<log content>"` | `log="..."` — param is `text`, not `log` |
+| `chimera_optimize` | `preserve_code=true` (JSON bool) | `preserve_code="true"` (string rejected) |
+| `chimera_cost_track` | `tokens_saved=265` (integer) | `tokens_saved="265"` (string rejected) |
+| `chimera_mode` | `task_description="..."` | `task_type="..."` (schema says `task_type` but handler reads `task_description`) |
+| `chimera_glyph_translate` | `verbosity="terse"` or `"natural"` | any other string → silently falls back to `"natural"` |
+| `chimera_batch` | `operations=[{"tool": "chimera_optimize", "arguments": {...}}]` | flat args — must be an array of `{tool, arguments}` objects |
+
+---
+
 ## Reasoning lane — verification, deliberation, claims
 
 | Trigger | First-choice tool | Notes |
@@ -64,7 +80,21 @@ The chimeralang-mcp server (currently `0.7.1`) exposes 51 tools. Routing all of 
 | User asks for a system prompt that forces CG | `chimera_glyph_directive` only — paste the returned `directive` into the system slot. |
 | User pastes CG and wants the English | `chimera_glyph_translate(verbosity="natural")`; use `terse` to strip heuristic articles/copulas. |
 
-Measured savings on a 10-sentence representative corpus: 46.2% token reduction, 0.11 ms/sentence end-to-end. See `docs/case-studies/chimera-glyph-feature.md` for the full benchmark.
+### Glyph worked example
+
+English (14 tokens): *"The user wants to know how to fix the error returned by the function."*
+CG (≈8 tokens): `usr wnt kn fix err $rt fn.`
+Decoded English: *"User wants know fix error return function."*
+
+Token reduction: **43%** on this sentence. Across a 10-sentence representative corpus: **46.2%** average, **0.11 ms/sentence** end-to-end. See `docs/case-studies/chimera-glyph-feature.md` for the full benchmark.
+
+**Grammar cheat-sheet:**
+- No articles (`a/an/the`) — drop them.
+- No copulas (`is/are/was`) — implied by juxtaposition.
+- Tense: suffix on verb — `^` past, `~` future (or standalone `~` = "will"), `?` conditional/uncertain ("might"), `!` certain ("must"). No suffix = present.
+- Pronouns: `i`, `u`, `w`, `t`, `x` (it/this).
+- Sigils: `@` entity (proper noun/identifier preserved verbatim), `#` concept, `$` action.
+- Unknown words pass through as `@token`.
 
 ---
 
@@ -83,6 +113,53 @@ Use `chimera_mode(task_description="...")` for auto-detection — keywords like 
 
 ---
 
+## Worked examples — prompt → tool sequence
+
+**1. Summarize a large design doc**
+```
+User: "Here's a 2000-word design doc. Summarize it."
+→ chimera_csm
+→ chimera_mode(task_description="summarize design doc")           # → token mode
+→ chimera_optimize(text=<doc>, preserve_code=false)               # 60-75% reduction
+→ chimera_summarize(text=<compressed_doc>)                        # deterministic extractive
+```
+
+**2. Diagnose a failing CI log**
+```
+User: "Why did my CI fail?" + 500-line log attached
+→ chimera_csm
+→ chimera_log_compress(text=<log>)                                # errors verbatim, body abridged
+→ answer from compressed log (no additional chimera call needed)
+```
+
+**3. Multi-perspective analysis**
+```
+User: "Analyze these 3 competing API designs"
+→ chimera_csm
+→ chimera_mode(task_description="analyze competing API designs")  # → agi mode
+→ chimera_deliberate(topic=<question>, perspectives=[<A>,<B>,<C>])
+→ chimera_gate(candidates=[<A_analysis>,<B_analysis>,<C_analysis>])
+```
+
+**4. Claim verification / hallucination check**
+```
+User: "Is this claim accurate?" + source text
+→ chimera_csm
+→ chimera_claims(text=<claim_text>)                               # extract atomic claims
+→ chimera_verify(claims=[...], evidence=<source_text>)            # token-overlap scoring
+→ chimera_detect(text=<claim_text>)                               # MCP attack / injection check
+```
+
+**5. AI-to-AI compressed internal reasoning**
+```
+User: "Reason through this internally then explain your answer"
+→ chimera_glyph_directive(style="strict", task_hint=<task>)       # get CG system directive
+→ [agent emits CG internally]
+→ chimera_glyph_translate(glyph_text=<CG_output>, verbosity="natural")  # recover English
+```
+
+---
+
 ## Enforcement checklist (run at the start of any non-trivial task)
 
 The skill is **enforcing** when the agent does these in order:
@@ -98,12 +175,60 @@ If any of these steps would consume more tokens than they save (e.g. running `ch
 
 ---
 
+## Telemetry reaction matrix
+
+Check `chimera_dashboard` after a run and respond to these signals:
+
+| Signal | Threshold | Action |
+|---|---|---|
+| `avg_pct_saved` | < 30% | Inputs may be too short — review whether skip conditions apply; avoid firing chimera on sub-200-char prompts |
+| `avg_pct_saved` | > 70% | Healthy — consider `chimera_cache_mark` on any stable system blocks for additional lossless savings |
+| Dedup hits (`chimera_dedup_lookup`) | > 2 in a session | Wrap repeated identical calls in `chimera_batch`; same inputs should not re-fire |
+| Session cost (`chimera_session_report`) | savings > $0.01 | Record for ROI evidence; the `dashboard` shows per-tool breakdown |
+| `chimera_mode` returned `minimal` | — | Only 6 tools active; if the task grows, re-call `chimera_mode` with an updated description |
+| `chimera_cost_track` returns `UnboundLocalError` | — | Known false-negative bug — the entry IS persisted; verify via `chimera_dashboard` |
+
+---
+
 ## Skip conditions (do not invoke chimera tools)
 
 - Prompt is `< 200` chars and has no attachments.
 - The user is debugging the chimeralang-mcp project itself (don't compress the very thing you're trying to read).
 - The user is asking a meta question about the tools (definitions, schemas, "what does X do") — answer directly.
 - The user has explicitly said "skip chimera" or "raw output only".
+
+---
+
+## Long tail — tools not in the main routing matrix
+
+These 24 tools are real but situational. Use them when the primary matrix doesn't cover the need:
+
+| Tool | When to reach for it |
+|---|---|
+| `chimera_audit` | Audit a ChimeraLang program for policy violations before running it. |
+| `chimera_budget_lock` | Hard-cap the token budget for a session so no call can exceed it. |
+| `chimera_confident` | Emit a confidence score for a single answer before committing to it. |
+| `chimera_constrain` | Apply type constraints to a value (probabilistic type checking at runtime). |
+| `chimera_cost_estimate` | Estimate token cost of a planned operation before executing it. |
+| `chimera_cost_track` | Log actual tokens saved after a compression step (for dashboard). Note: returns a false `UnboundLocalError` but DOES persist the entry. |
+| `chimera_dashboard` | Retrieve the session cost/savings summary mid-session (Stop hook shows totals automatically). |
+| `chimera_embodied` | Model the agent's own physical/environmental context for situated reasoning. |
+| `chimera_ethical_eval` | Run a structured ethical evaluation pass on a proposed action or output. |
+| `chimera_evolve` | Iteratively refine a candidate answer through successive improvement passes. |
+| `chimera_explore` | Breadth-first search across a knowledge/solution space before committing to one path. |
+| `chimera_knowledge` | Query the embedded knowledge graph for factual grounding. |
+| `chimera_materials` | Retrieve relevant reference materials (docs, examples) from the internal corpus. |
+| `chimera_memory` | Persist a key fact across turns within the session (key-value store). |
+| `chimera_meta_learn` | Apply few-shot meta-learning patterns from prior task examples. |
+| `chimera_plan_goals` | Decompose a high-level goal into a ranked, dependency-ordered task list. |
+| `chimera_policy` | Check an action against the active safety/behavior policy before executing. |
+| `chimera_provenance_merge` | Merge multiple provenanced sources while preserving attribution chains. |
+| `chimera_safety_check` | Run a targeted safety analysis on a code diff or LLM output. |
+| `chimera_self_model` | Query the agent's own capability/uncertainty model for a given task type. |
+| `chimera_social` | Model social context (roles, norms, relationship history) for conversational tasks. |
+| `chimera_trace` | Emit a structured execution trace for debugging a multi-step chimera pipeline. |
+| `chimera_transfer_learn` | Apply transfer-learning heuristics from a source task to the current target task. |
+| `chimera_world_model` | Query or update the agent's world-state model (used in planning/`plan_goals` chains). |
 
 ---
 
