@@ -160,6 +160,17 @@ class TestRegressions071(unittest.TestCase):
         self.assertIn("will", english.lower())
         self.assertIn("work", english.lower())
 
+    # Codex review followup — suffixed verb stems must not be intercepted
+    # by whole-token reverse lookup; "gø~" should decode as "will go",
+    # not "going" (regression introduced by an earlier round of fixes).
+    def test_suffix_verb_round_trip_preserves_tense(self):
+        cg_text = cg.encode("I am going.")
+        self.assertIn("gø~", cg_text)
+        english, notes = cg.decode(cg_text)
+        self.assertIn("will go", english.lower())
+        self.assertNotIn("going", english.lower())
+        self.assertEqual(notes, [])
+
     # Issue 4 — directive examples must round-trip without unrecognized tokens.
     def test_directive_examples_round_trip(self):
         d = cg.directive("strict")

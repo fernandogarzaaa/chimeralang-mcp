@@ -24,8 +24,13 @@ CHIMERA GLYPH (CG) — token-efficient AI language.
 CORE RULES
   1. No articles: drop "a", "an", "the".
   2. No copulas: "is/are/was" implicit by juxtaposition. ("x red" = "x is red")
-  3. SVO order. No inflection. Tense via single-char verb suffix:
-       ^ past   ~ future   (no suffix) present   ? conditional/uncertain
+  3. SVO order. No inflection. Tense / modality markers may be attached
+     as a single trailing suffix on a verb OR emitted as a standalone
+     token immediately before the verb (both forms decode the same):
+       ^ past        ~ future / will        ? might / uncertain
+       ! must / certain                     (no marker) = present
+     Do NOT stack markers (e.g. `wrk~?`) or fuse them with operators
+     (e.g. `¬!`) — emit each as its own token.
   4. Pronouns collapse: i, u, w (we), t (they), x (it/this).
   5. Logical operators (each is typically 1 token):
        →  causes/implies        ⇒  therefore
@@ -62,16 +67,11 @@ EXAMPLES
   EN: "If the test fails, then we should retry it."
   CG: "if tst fail ⇒ w ? rt-retry x."
 
-  EN: "I am not sure this approach will work."
-  CG: "i ¬ ! aprch ~ wrk."
+  EN: "Maybe this approach will work."
+  CG: "mb aprch wrk~."
 
   EN: "The model returned a null result."
   CG: "mdl rt^ ∅ rs."
-
-NOTE: tense/modality markers are STANDALONE tokens (~ = will, ? = might,
-! = must). The verb suffix `^` (past) is the only suffix supported on
-verb stems. Do not stack suffixes (e.g. `wrk~?`) or fuse operators with
-quantifiers (e.g. `¬!`) — emit them as separate tokens.
 """
 
 
@@ -293,13 +293,18 @@ def _decode_token(tok: str, notes: list[str]) -> tuple[str, str]:
         return tok[1:], "ent"
     if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", tok):
         return tok, "num"
-    # Try the whole token in REVERSE_LEXICON FIRST — covers canonical
-    # hyphenated stems like "rt-retry" → "retry" without splitting.
-    if tok in REVERSE_LEXICON:
+    # Hyphenated stems: try the whole token in REVERSE_LEXICON first.
+    # Catches canonical compounds like "rt-retry" → "retry" without
+    # splitting into ["return", "retry"]. Restricted to hyphenated
+    # tokens so it doesn't shadow suffix semantics for entries like
+    # "going" -> "gø~" (the ~ must still be applied as future).
+    if "-" in tok and tok in REVERSE_LEXICON:
         return REVERSE_LEXICON[tok], _classify(tok)
-    # strip a single tense suffix (only "^"; "~/?/!" are standalone modals)
+    # Strip a single trailing tense/modal suffix. Bare-glyph standalone
+    # modals (just "~"/"?"/"!") were already handled above; here we only
+    # strip when the token has a stem in front of the suffix.
     base, suffix = tok, ""
-    if tok and tok[-1] == "^":
+    if len(tok) > 1 and tok[-1] in {"^", "~", "?", "!"}:
         base, suffix = tok[:-1], tok[-1]
     # full base in lexicon (post-suffix-strip)
     if base in REVERSE_LEXICON:
@@ -320,6 +325,12 @@ def _decode_token(tok: str, notes: list[str]) -> tuple[str, str]:
         return f"[{tok}]", "ent"
     if suffix == "^":
         word = _past_tense(word)
+    elif suffix == "~":
+        word = "will " + word
+    elif suffix == "?":
+        word = "might " + word
+    elif suffix == "!":
+        word = "must " + word
     return word, _classify(base)
 
 
