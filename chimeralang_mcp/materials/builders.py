@@ -62,7 +62,7 @@ _SOURCES: list[dict[str, Any]] = [
         "id": "guardrails-ai/guardrails",
         "kind": "github_repo",
         "url": "https://github.com/guardrails-ai/guardrails",
-        "revision": "379ab72ff643d0d9b8dff4f74c956ce29eab341d",
+        "revision": "379ab72ff643d0d9b8dff4f74c956ce29eab341d",  # pragma: allowlist secret
         "license": "Apache-2.0",
         "usage_scope": "runtime",
         "bundle_policy": "bundled_runtime_derived",
@@ -73,7 +73,7 @@ _SOURCES: list[dict[str, Any]] = [
         "id": "OWASP/www-project-mcp-top-10",
         "kind": "github_repo",
         "url": "https://github.com/OWASP/www-project-mcp-top-10",
-        "revision": "4774c5e5ae345e38c3c397e6ec42469ecf9bfc97",
+        "revision": "4774c5e5ae345e38c3c397e6ec42469ecf9bfc97",  # pragma: allowlist secret
         "license": "CC-BY-NC-SA-4.0",
         "usage_scope": "docs",
         "bundle_policy": "metadata_only",
@@ -84,7 +84,7 @@ _SOURCES: list[dict[str, Any]] = [
         "id": "liu00222/Open-Prompt-Injection",
         "kind": "github_repo",
         "url": "https://github.com/liu00222/Open-Prompt-Injection",
-        "revision": "95290f7ce3794c4c52ad3fe8113db2bfcdfe89e0",
+        "revision": "95290f7ce3794c4c52ad3fe8113db2bfcdfe89e0",  # pragma: allowlist secret
         "license": "MIT",
         "usage_scope": "runtime",
         "bundle_policy": "bundled_runtime_derived",
@@ -95,7 +95,7 @@ _SOURCES: list[dict[str, Any]] = [
         "id": "harishsg993010/damn-vulnerable-MCP-server",
         "kind": "github_repo",
         "url": "https://github.com/harishsg993010/damn-vulnerable-MCP-server",
-        "revision": "79734c19f5104cd11486c90926d245560f53befa",
+        "revision": "79734c19f5104cd11486c90926d245560f53befa",  # pragma: allowlist secret
         "license": "NOASSERTION",
         "usage_scope": "eval",
         "bundle_policy": "metadata_only",
@@ -172,7 +172,7 @@ _SOURCES: list[dict[str, Any]] = [
         "id": "shmsw25/FActScore",
         "kind": "github_repo",
         "url": "https://github.com/shmsw25/FActScore",
-        "revision": "f28272deffcf33efc1f1117d5479c10bb75221a9",
+        "revision": "f28272deffcf33efc1f1117d5479c10bb75221a9",  # pragma: allowlist secret
         "license": "MIT",
         "usage_scope": "runtime",
         "bundle_policy": "bundled_runtime_derived",
@@ -183,7 +183,7 @@ _SOURCES: list[dict[str, Any]] = [
         "id": "lflage/OpenFActScore",
         "kind": "github_repo",
         "url": "https://github.com/lflage/OpenFActScore",
-        "revision": "35c08f1f6137726986da71f151f001366ca683db",
+        "revision": "35c08f1f6137726986da71f151f001366ca683db",  # pragma: allowlist secret
         "license": "MIT",
         "usage_scope": "runtime",
         "bundle_policy": "bundled_runtime_derived",
@@ -194,7 +194,7 @@ _SOURCES: list[dict[str, Any]] = [
         "id": "modelcontextprotocol/conformance",
         "kind": "github_repo",
         "url": "https://github.com/modelcontextprotocol/conformance",
-        "revision": "d94412200363296d8ab8b0c9dde4015c1ac32dd6",
+        "revision": "d94412200363296d8ab8b0c9dde4015c1ac32dd6",  # pragma: allowlist secret
         "license": "NOASSERTION",
         "usage_scope": "ci",
         "bundle_policy": "metadata_only",
@@ -205,7 +205,7 @@ _SOURCES: list[dict[str, Any]] = [
         "id": "ethz-spylab/agentdojo",
         "kind": "github_repo",
         "url": "https://github.com/ethz-spylab/agentdojo",
-        "revision": "18b501a630db736e1d0496a496d8d7aa947c596d",
+        "revision": "18b501a630db736e1d0496a496d8d7aa947c596d",  # pragma: allowlist secret
         "license": "MIT",
         "usage_scope": "eval",
         "bundle_policy": "bundled_eval_derived",
@@ -216,7 +216,7 @@ _SOURCES: list[dict[str, Any]] = [
         "id": "microsoft/BIPIA",
         "kind": "github_repo",
         "url": "https://github.com/microsoft/BIPIA",
-        "revision": "a004b69ec0dd446e0afd461d98cb5e96e120a5d0",
+        "revision": "a004b69ec0dd446e0afd461d98cb5e96e120a5d0",  # pragma: allowlist secret
         "license": "NOASSERTION",
         "usage_scope": "eval",
         "bundle_policy": "metadata_only",

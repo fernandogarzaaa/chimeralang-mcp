@@ -23,6 +23,11 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
+      - name: Check for new secrets
+        run: |
+          pip install detect-secrets -q
+          python -m detect_secrets scan --baseline .secrets.baseline
+
       - name: Build wheel and sdist
         run: python -m build
 

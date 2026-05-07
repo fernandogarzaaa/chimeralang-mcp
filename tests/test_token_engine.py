@@ -86,7 +86,7 @@ class TestTokenBudgetManager(unittest.TestCase):
 
     def test_api_error_increments_fallback_count(self):
         """API errors should increment fallback counters and preserve estimates."""
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "fake"}, clear=True):
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "fake"}, clear=True):  # pragma: allowlist secret
             from chimeralang_mcp.token_engine import TokenBudgetManager
             TokenBudgetManager._instance = None
             tbm = TokenBudgetManager()
