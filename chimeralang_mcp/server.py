@@ -5381,14 +5381,17 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         elif name == "chimera_glyph_translate":
             glyph_text = arguments["glyph_text"]
             verbosity = str(arguments.get("verbosity", "natural")).lower()
+            if verbosity not in ("terse", "natural"):
+                verbosity = "natural"
             english, notes = _ai_language.decode(glyph_text)
             if verbosity == "terse":
-                # collapse "the"/"is" inserted by the natural-mode heuristic
-                english = re.sub(r"\bthe\s+", "", english)
-                english = re.sub(r"\bis\s+", "", english)
+                english = re.sub(r"\bthe\s+", "", english, flags=re.IGNORECASE)
+                english = re.sub(r"\bis\s+", "", english, flags=re.IGNORECASE)
                 english = re.sub(r"\s+", " ", english).strip()
-                if english and english[-1] not in ".!?":
-                    english += "."
+                if english:
+                    english = english[0].upper() + english[1:]
+                    if english[-1] not in ".!?":
+                        english += "."
             return _ok({
                 "english": english,
                 "glyph_text": glyph_text,

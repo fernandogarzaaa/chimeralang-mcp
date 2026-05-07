@@ -60,13 +60,18 @@ EXAMPLES
   CG: "usr wnt kn fix err in fn."
 
   EN: "If the test fails, then we should retry it."
-  CG: "if tst fail ⇒ w rt-retry x."
+  CG: "if tst fail ⇒ w ? rt-retry x."
 
   EN: "I am not sure this approach will work."
-  CG: "i ¬! aprch wrk~?"
+  CG: "i ¬ ! aprch ~ wrk."
 
   EN: "The model returned a null result."
   CG: "mdl rt^ ∅ rs."
+
+NOTE: tense/modality markers are STANDALONE tokens (~ = will, ? = might,
+! = must). The verb suffix `^` (past) is the only suffix supported on
+verb stems. Do not stack suffixes (e.g. `wrk~?`) or fuse operators with
+quantifiers (e.g. `¬!`) — emit them as separate tokens.
 """
 
 
@@ -253,57 +258,68 @@ def encode(text: str) -> str:
 
 # ── decoder: CG -> English (lossy reconstruction) ────────────────────────────
 
-# tokens that act as connectives where we should NOT prepend "the"
+# tokens that act as connectives where we should NOT prepend "the".
+# Note: `?` and `!` are intentionally NOT in here — they are modality markers
+# (some/certain), and `.` is the sole sentence terminator.
 _CONNECTIVE_TOKENS = set(OPERATORS.keys()) | {
     "if", "el", "wh", "fr", "in", "on", "at", "to", "fm", "w/", "w/o",
     "by", "of", "how", "wht", "why", "wn", "wr", "who", "wch",
     "y", "n", "mb", "T", "F",
-    ".", "?", "!",
+    ".",
     "i", "u", "w", "t", "x", "p",
 }
 
 _PRONOUN_TOKENS = {"i", "u", "w", "t", "x", "p"}
 
+# Standalone modality / tense glyphs (when not used as a verb suffix).
+_STANDALONE_MODAL: dict[str, str] = {
+    "~": "will",
+    "?": "might",
+    "!": "must",
+}
+
 
 def _decode_token(tok: str, notes: list[str]) -> tuple[str, str]:
     """Return (english, kind) for a single CG token. kind ∈ {noun, verb,
-    adj, op, ent, num, conn, term, drop}.
+    adj, op, ent, num, conn, term, drop, modal}.
     """
-    if tok in {".", "!", "?"}:
+    if tok == ".":
         return ".", "term"
+    if tok in _STANDALONE_MODAL:
+        return _STANDALONE_MODAL[tok], "modal"
     if tok in OPERATORS:
         return OPERATORS[tok], "op"
     if tok.startswith("@"):
         return tok[1:], "ent"
     if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", tok):
         return tok, "num"
-    # strip tense suffix for lookup
+    # Try the whole token in REVERSE_LEXICON FIRST — covers canonical
+    # hyphenated stems like "rt-retry" → "retry" without splitting.
+    if tok in REVERSE_LEXICON:
+        return REVERSE_LEXICON[tok], _classify(tok)
+    # strip a single tense suffix (only "^"; "~/?/!" are standalone modals)
     base, suffix = tok, ""
-    if tok and tok[-1] in {"^", "~", "?", "!"}:
+    if tok and tok[-1] == "^":
         base, suffix = tok[:-1], tok[-1]
-    # handle compounds joined by hyphen ("rt-retry")
-    if "-" in base:
-        parts = [REVERSE_LEXICON.get(p, p) for p in base.split("-")]
-        word = " ".join(p for p in parts if p)
-    elif base in REVERSE_LEXICON:
+    # full base in lexicon (post-suffix-strip)
+    if base in REVERSE_LEXICON:
         word = REVERSE_LEXICON[base]
     elif base in _PRONOUN_TOKENS:
         word = {"i": "I", "u": "you", "w": "we", "t": "they",
                 "x": "it", "p": "they"}[base]
     elif base in _CONNECTIVE_TOKENS:
         word = base
+    elif "-" in base:
+        # fallback: split a non-canonical hyphenated stem
+        parts = [REVERSE_LEXICON.get(p, p) for p in base.split("-")]
+        word = " ".join(p for p in parts if p)
     elif not base:
         return "", "drop"
     else:
         notes.append(f"unrecognized:{tok}")
         return f"[{tok}]", "ent"
-    # apply tense
     if suffix == "^":
         word = _past_tense(word)
-    elif suffix == "~":
-        word = "will " + word
-    elif suffix == "?":
-        word = "might " + word
     return word, _classify(base)
 
 
@@ -434,8 +450,8 @@ def directive(style: str = "strict", task_hint: str | None = None) -> str:
     examples = (
         "EXAMPLES OF VALID OUTPUT:\n"
         "  usr wnt kn fix err in fn.\n"
-        "  if tst fail ⇒ w rt-retry x.\n"
-        "  i thk aprch wrk~ ∧ rs gd."
+        "  if tst fail ⇒ w ? rt-retry x.\n"
+        "  i thk aprch ~ wrk ∧ rs gd."
     )
     hint = f"\n\nTASK CONTEXT: {task_hint}" if task_hint else ""
     return f"{header}\n\n{rule}\n\n{GRAMMAR_SPEC}\n{examples}{hint}"

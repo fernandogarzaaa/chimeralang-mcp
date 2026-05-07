@@ -134,5 +134,58 @@ class TestGlyphTranslateTool(unittest.TestCase):
         self.assertTrue(any("unrecognized" in n for n in payload["notes"]))
 
 
+class TestRegressions071(unittest.TestCase):
+    """Regression coverage for the five issues fixed in 0.7.1."""
+
+    # Issue 1 — only "." terminates; "?" / "!" are modality markers.
+    def test_question_glyph_does_not_split_sentence(self):
+        english, _ = cg.decode("w ? rt-retry x.")
+        self.assertEqual(english.count("."), 1, f"unexpected sentence break: {english!r}")
+        self.assertIn("might", english.lower())
+
+    def test_bang_glyph_renders_as_must(self):
+        english, _ = cg.decode("u ! chk dt.")
+        self.assertIn("must", english.lower())
+        self.assertEqual(english.count("."), 1)
+
+    # Issue 2 — canonical hyphenated stems decode as a single term.
+    def test_hyphenated_stem_uses_full_lookup(self):
+        english, _ = cg.decode("w rt-retry.")
+        self.assertIn("retry", english.lower())
+        self.assertNotIn("return retry", english.lower())
+
+    # Issue 3 — standalone "~" decodes to "will" instead of being dropped.
+    def test_standalone_tilde_is_will(self):
+        english, _ = cg.decode("aprch ~ wrk.")
+        self.assertIn("will", english.lower())
+        self.assertIn("work", english.lower())
+
+    # Issue 4 — directive examples must round-trip without unrecognized tokens.
+    def test_directive_examples_round_trip(self):
+        d = cg.directive("strict")
+        for line in d.splitlines():
+            line = line.strip()
+            if not line or not line.startswith(("usr ", "if ", "i ", "mdl ")):
+                continue
+            _, notes = cg.decode(line)
+            self.assertEqual(notes, [], f"example failed to decode cleanly: {line!r} → {notes}")
+
+    # Issue 5 — verbosity is validated; terse strips capitalized "The".
+    def test_translate_invalid_verbosity_falls_back_to_natural(self):
+        payload = _tool_payload(
+            "chimera_glyph_translate",
+            {"glyph_text": "usr nd rs.", "verbosity": "loud"},
+        )
+        self.assertEqual(payload["verbosity"], "natural")
+
+    def test_translate_terse_strips_leading_capitalized_the(self):
+        payload = _tool_payload(
+            "chimera_glyph_translate",
+            {"glyph_text": "usr nd rs.", "verbosity": "terse"},
+        )
+        self.assertNotIn("The ", payload["english"])
+        self.assertNotIn(" the ", payload["english"])
+
+
 if __name__ == "__main__":
     unittest.main()
