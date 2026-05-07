@@ -2743,7 +2743,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "task_description": {
                         "type": "string",
-                        "description": "Optional task description for auto mode recommendation.",
+                        "description": "Optional task description for auto mode recommendation. (Note: parameter name is task_description, not task_type.)",
                         "default": "",
                     },
                 },
@@ -4165,7 +4165,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
             original_len = len(text)
             result_text = text
-            log: list[str] = []
+            passes_log: list[str] = []
             code_blocks: list[str] = []
 
             if preserve_code:
@@ -4178,7 +4178,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 before = len(result_text)
                 result_text = _re.sub(r"[ \t]+", " ", result_text)
                 result_text = _re.sub(r"\n{3,}", "\n\n", result_text).strip()
-                log.append(f"whitespace: -{before - len(result_text)} chars")
+                passes_log.append(f"whitespace: -{before - len(result_text)} chars")
 
             if "dedup_sentences" in strategies:
                 before    = len(result_text)
@@ -4192,7 +4192,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     elif not key:
                         out_lines.append(line)
                 result_text = "\n".join(out_lines)
-                log.append(f"dedup_sentences: -{before - len(result_text)} chars")
+                passes_log.append(f"dedup_sentences: -{before - len(result_text)} chars")
 
             if "strip_filler" in strategies:
                 before = len(result_text)
@@ -4206,7 +4206,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 ]:
                     result_text = _re.sub(pat, "", result_text, flags=_re.IGNORECASE)
                 result_text = _re.sub(r"[ \t]{2,}", " ", result_text).strip()
-                log.append(f"strip_filler: -{before - len(result_text)} chars")
+                passes_log.append(f"strip_filler: -{before - len(result_text)} chars")
 
             if "collapse_lists" in strategies:
                 before = len(result_text)
@@ -4223,7 +4223,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 if items_ordered:
                     rebuilt_parts = [f"{b} {t}" for b, t in items_ordered]
                     result_text = "\n".join(rebuilt_parts)
-                log.append(f"collapse_lists: -{before - len(result_text)} chars")
+                passes_log.append(f"collapse_lists: -{before - len(result_text)} chars")
 
             # Restore code blocks
             if preserve_code:
@@ -4240,7 +4240,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "chars_saved": saved,
                 "reduction_ratio": ratio,
                 "estimated_tokens_saved": max(0, round(saved / 4)),
-                "passes_applied": log,
+                "passes_applied": passes_log,
                 "code_blocks_preserved": len(code_blocks),
                 "algorithm": "classic",
                 "focus_terms": extract_focus_terms(focus),

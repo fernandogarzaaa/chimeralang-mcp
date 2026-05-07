@@ -1,6 +1,6 @@
 ---
 name: chimera
-chimera_version: "0.7.1"
+chimera_version: "0.7.2"
 description: "Trigger: large document (>500 chars), build/test log, long conversation history, claim-checking, hallucination detection, multi-tool batch, or token-cost concerns. Routes each request to the smallest correct chimera_* tool subset and skips chimera entirely for prompts <200 chars with no attachments."
 ---
 
@@ -48,7 +48,7 @@ Common mistakes that cause tool errors:
 | `chimera_log_compress` | `text="<log content>"` | `log="..."` — param is `text`, not `log` |
 | `chimera_optimize` | `preserve_code=true` (JSON bool) | `preserve_code="true"` (string rejected) |
 | `chimera_cost_track` | `tokens_saved=265` (integer) | `tokens_saved="265"` (string rejected) |
-| `chimera_mode` | `task_description="..."` | `task_type="..."` (schema says `task_type` but handler reads `task_description`) |
+| `chimera_mode` | `task_description="..."` | `task_type="..."` (unknown args are silently dropped) |
 | `chimera_glyph_translate` | `verbosity="terse"` or `"natural"` | any other string → silently falls back to `"natural"` |
 | `chimera_batch` | `operations=[{"tool": "chimera_optimize", "arguments": {...}}]` | flat args — must be an array of `{tool, arguments}` objects |
 
@@ -186,7 +186,7 @@ Check `chimera_dashboard` after a run and respond to these signals:
 | Dedup hits (`chimera_dedup_lookup`) | > 2 in a session | Wrap repeated identical calls in `chimera_batch`; same inputs should not re-fire |
 | Session cost (`chimera_session_report`) | savings > $0.01 | Record for ROI evidence; the `dashboard` shows per-tool breakdown |
 | `chimera_mode` returned `minimal` | — | Only 6 tools active; if the task grows, re-call `chimera_mode` with an updated description |
-| `chimera_cost_track` returns `UnboundLocalError` | — | Known false-negative bug — the entry IS persisted; verify via `chimera_dashboard` |
+| `chimera_cost_track` errors | — | Fixed in `0.7.2`; on `< 0.7.2` the entry is persisted despite the error — verify via `chimera_dashboard` |
 
 ---
 
@@ -246,8 +246,10 @@ These numbers came from running the actual tools while writing this skill:
 
 ## Known issues observed while writing this skill (file as follow-ups)
 
-1. `chimera_cost_track` returns an `UnboundLocalError: cannot access local variable 'log'` even though the entry IS persisted (visible in `chimera_dashboard`). The error response is a false negative.
-2. `chimera_mode` accepts `mode` and `task_description` — `task_type` is ignored and falls through to `minimal`. Schema and docs say `task_type`, handler reads `task_description`. Either the schema or the handler needs updating.
+Both issues from `0.7.1` were resolved in `0.7.2`:
+
+1. ~~`chimera_cost_track` returns an `UnboundLocalError`~~ — **fixed in 0.7.2**: a local `log: list[str]` in the `chimera_optimize` handler shadowed the module-level logger; renamed to `passes_log` to free the name.
+2. ~~`chimera_mode` accepts `task_type` but handler reads `task_description`~~ — **not actually a bug**: the schema declares `task_description`, matching the handler. The original `0.7.1` skill note was wrong.
 
 ---
 
