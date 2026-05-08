@@ -43,6 +43,13 @@ from chimera.types import ConfidenceViolation
 from chimera.claude_adapter import ClaudeConstraintMiddleware, ToolCallSpec
 
 from chimeralang_mcp import __version__
+from chimeralang_mcp.replay import (
+    REPLAYABLE_TOOLS as _REPLAYABLE_TOOLS,
+    build_replay_program as _build_replay_program,
+    hash_program as _hash_program,
+    is_replay_program as _is_replay_program,
+    parse_replay_program as _parse_replay_program,
+)
 from chimeralang_mcp.token_engine import (
     TokenBudgetManager,
     MessageImportanceScorer,
@@ -3026,7 +3033,24 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         # ── chimera_run ───────────────────────────────────────────────────
         if name == "chimera_run":
             namespace = _state_namespace(arguments)
-            result = _run(arguments["source"])
+            source = arguments["source"]
+            # Replay envelope: re-dispatch the captured tool invocation.
+            # This is how Phase 2 gate-tool programs round-trip (P2 of BLUEPRINT.md).
+            if _is_replay_program(source):
+                try:
+                    body = _parse_replay_program(source)
+                except ValueError as e:
+                    return _err(f"replay program rejected: {e}")
+                inner_result = await call_tool(body["tool"], body["args"])
+                inner_payload = json.loads(inner_result.content[0].text)
+                return _ok({
+                    "replay_dispatched": True,
+                    "tool":              body["tool"],
+                    "version":           body["version"],
+                    "program_hash":      _hash_program(source),
+                    "result":            inner_payload,
+                })
+            result = _run(source)
             result["envelope"] = _build_envelope(
                 result,
                 kind="chimera_execution",
@@ -3034,7 +3058,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 confidence_source="runtime_execution",
                 namespace=namespace,
                 tool_name=name,
-                metadata={"source_length": len(arguments["source"])},
+                metadata={"source_length": len(source)},
             )
             return _ok(result)
 
@@ -3188,6 +3212,21 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     f"Consensus confidence {consensus_conf:.3f} below threshold {threshold}. "
                     "Result is unreliable — consider more branches or lower threshold."
                 )
+            # Phase 2 (P2.S2): emit a replay envelope so this exact gate call
+            # can be re-executed via chimera_run, hashed via chimera_prove,
+            # and validated via chimera_typecheck.
+            replay_args = {
+                "candidates": candidates,
+                "strategy":   strategy,
+                "threshold":  threshold,
+            }
+            replay_program = _build_replay_program("chimera_gate", replay_args)
+            result["provenance"] = {
+                "program":      replay_program,
+                "program_hash": _hash_program(replay_program),
+                "replayable":   True,
+                "tool":         "chimera_gate",
+            }
             return _ok(result)
 
         # ── chimera_detect ────────────────────────────────────────────────
@@ -3435,6 +3474,22 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         # ── chimera_typecheck ─────────────────────────────────────────────
         elif name == "chimera_typecheck":
             source  = arguments["source"]
+            # Replay envelopes are validated by structure, not by ChimeraLang
+            # surface syntax. The check is: known-tool name + JSON-shaped args.
+            if _is_replay_program(source):
+                try:
+                    _parse_replay_program(source)
+                except ValueError as e:
+                    return _ok({
+                        "ok": False, "error_count": 1, "warning_count": 0,
+                        "errors": [str(e)], "warnings": [],
+                        "kind": "replay_envelope",
+                    })
+                return _ok({
+                    "ok": True, "error_count": 0, "warning_count": 0,
+                    "errors": [], "warnings": [],
+                    "kind": "replay_envelope",
+                })
             tokens  = Lexer(source).tokenize()
             ast     = Parser(tokens).parse()
             result  = TypeChecker().check(ast)
@@ -3450,6 +3505,47 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         elif name == "chimera_prove":
             namespace = _state_namespace(arguments)
             source  = arguments["source"]
+            # Replay envelope: hash the canonical program text and re-dispatch
+            # the inner tool. The hash IS the proof — same args produce same
+            # text produce same hash, and the inner tool is deterministic by
+            # whitelist. No Merkle chain since there are no intermediate steps.
+            if _is_replay_program(source):
+                try:
+                    body = _parse_replay_program(source)
+                except ValueError as e:
+                    return _err(f"replay program rejected: {e}")
+                inner_result = await call_tool(body["tool"], body["args"])
+                inner_payload = json.loads(inner_result.content[0].text)
+                program_hash = _hash_program(source)
+                payload = {
+                    "execution": {"emitted": [], "errors": [], "kind": "replay_envelope"},
+                    "proof": {
+                        "verdict":            "certified",
+                        "chain_length":       1,
+                        "root_hash":          program_hash,
+                        "chain_valid":        True,
+                        "program_hash":       program_hash,
+                        "tool":               body["tool"],
+                        "version":            body["version"],
+                        "result":             inner_payload,
+                        "note": (
+                            "Replay envelope — hash is over the canonical program "
+                            "text. Re-running chimera_prove with the same source "
+                            "produces the same hash and the same inner result."
+                        ),
+                    },
+                }
+                payload["envelope"] = _build_envelope(
+                    payload,
+                    kind="integrity_proof",
+                    confidence=1.0,
+                    confidence_source="replay_envelope",
+                    namespace=namespace,
+                    tool_name=name,
+                    metadata={"verdict": "certified", "chain_length": 1,
+                              "program_hash": program_hash},
+                )
+                return _ok(payload)
             tokens  = Lexer(source).tokenize()
             ast     = Parser(tokens).parse()
             vm      = ChimeraVM()
@@ -3709,11 +3805,22 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 "source_ids": verification["source_ids"],
                 "security_category_counts": verification["security_category_counts"],
             })
+            # Phase 2 (P2.S4): replay envelope. Inputs locked to the resolved
+            # claims + original evidence (not the optional envelope/text inputs)
+            # so a replay re-derives the same verification deterministically.
+            replay_args = {"claims": claims, "evidence": evidence}
+            replay_program = _build_replay_program("chimera_verify", replay_args)
             return _ok({
                 "claims": claims,
                 **verification,
                 "namespace": namespace,
                 "envelope": envelope.to_dict(),
+                "provenance": {
+                    "program":      replay_program,
+                    "program_hash": _hash_program(replay_program),
+                    "replayable":   True,
+                    "tool":         "chimera_verify",
+                },
             })
 
         elif name == "chimera_provenance_merge":
@@ -4494,7 +4601,17 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             prompt       = arguments.get("prompt", "")
             perspectives = arguments.get("perspectives", [])
             mode         = arguments.get("mode", "semantic")
-            return _ok(_get_deliberation().deliberate(prompt, perspectives, mode=mode))
+            payload = _get_deliberation().deliberate(prompt, perspectives, mode=mode)
+            # Phase 2 (P2.S4): replay envelope.
+            replay_args = {"prompt": prompt, "perspectives": perspectives, "mode": mode}
+            replay_program = _build_replay_program("chimera_deliberate", replay_args)
+            payload["provenance"] = {
+                "program":      replay_program,
+                "program_hash": _hash_program(replay_program),
+                "replayable":   True,
+                "tool":         "chimera_deliberate",
+            }
+            return _ok(payload)
 
         # ── AGI: chimera_metacognize ───────────────────────────────────────
         elif name == "chimera_metacognize":
@@ -4557,8 +4674,18 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             responses = arguments.get("responses", [])
             if not responses:
                 return _err("chimera_quantum_vote requires responses list")
-            return _ok(_quantum_vote(responses,
-                                     timeout_s=float(arguments.get("timeout_s", 5.0))))
+            timeout_s = float(arguments.get("timeout_s", 5.0))
+            payload = _quantum_vote(responses, timeout_s=timeout_s)
+            # Phase 2 (P2.S4): replay envelope.
+            replay_args = {"responses": responses, "timeout_s": timeout_s}
+            replay_program = _build_replay_program("chimera_quantum_vote", replay_args)
+            payload["provenance"] = {
+                "program":      replay_program,
+                "program_hash": _hash_program(replay_program),
+                "replayable":   True,
+                "tool":         "chimera_quantum_vote",
+            }
+            return _ok(payload)
 
         # ── AGI: chimera_plan_goals ─────────────────────────────────────────
         elif name == "chimera_plan_goals":

@@ -1,6 +1,6 @@
 ---
 name: chimera
-chimera_version: "0.7.3"
+chimera_version: "0.7.4"
 description: "Trigger: large document (>500 chars), build/test log, long conversation history, claim-checking, hallucination detection, multi-tool batch, or token-cost concerns. Routes each request to the smallest correct chimera_* tool subset and skips chimera entirely for prompts <200 chars with no attachments."
 ---
 
@@ -8,7 +8,7 @@ description: "Trigger: large document (>500 chars), build/test log, long convers
 
 Works for both Claude Code (via this `SKILL.md`) and Codex (via the sibling `AGENTS.md` adapter at repo root). Both agents end up running the same routing rules.
 
-The chimeralang-mcp server (currently `0.7.3`) exposes 51 tools. Routing all of them through every prompt is wasteful. The goal of this skill is: pick the smallest correct tool subset for the user's actual intent and execute the work through it.
+The chimeralang-mcp server (currently `0.7.4`) exposes 51 tools. Routing all of them through every prompt is wasteful. The goal of this skill is: pick the smallest correct tool subset for the user's actual intent and execute the work through it.
 
 ---
 
