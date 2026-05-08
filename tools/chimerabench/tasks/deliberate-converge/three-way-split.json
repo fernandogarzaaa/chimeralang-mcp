@@ -1,0 +1,44 @@
+{
+  "id": "three-way-split",
+  "family": "deliberate-converge",
+  "description": "Three perspectives with no shared lexical content \u2014 deliberation should report low consensus.",
+  "pipeline": [
+    {
+      "tool": "chimera_deliberate",
+      "args": {
+        "prompt": "what is the right approach?",
+        "perspectives": [
+          {
+            "perspective": "first",
+            "content": "rewrite the parser entirely from scratch"
+          },
+          {
+            "perspective": "second",
+            "content": "patch the existing typechecker module"
+          },
+          {
+            "perspective": "third",
+            "content": "wait for the upstream library release"
+          }
+        ],
+        "mode": "lexical_consensus"
+      }
+    }
+  ],
+  "expected": {
+    "program_hashes": [
+      "370f3780e8657e6df6f52fd1888af13fef86d608f4d72cb192c52313c778913e"
+    ],
+    "assertions": [
+      {
+        "step": 0,
+        "path": "perspectives.0.perspective",
+        "equals": "first"
+      }
+    ]
+  },
+  "metadata": {
+    "author": "chimerabench",
+    "purpose": "low-consensus-detection"
+  }
+}

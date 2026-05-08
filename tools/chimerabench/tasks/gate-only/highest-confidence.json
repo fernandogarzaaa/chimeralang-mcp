@@ -1,0 +1,54 @@
+{
+  "id": "highest-confidence",
+  "family": "gate-only",
+  "description": "highest_confidence strategy picks the single most confident candidate regardless of value-frequency.",
+  "pipeline": [
+    {
+      "tool": "chimera_gate",
+      "args": {
+        "candidates": [
+          {
+            "value": "low",
+            "confidence": 0.5
+          },
+          {
+            "value": "low",
+            "confidence": 0.55
+          },
+          {
+            "value": "decisive",
+            "confidence": 0.97
+          }
+        ],
+        "strategy": "highest_confidence",
+        "threshold": 0.9
+      }
+    }
+  ],
+  "expected": {
+    "program_hashes": [
+      "3a139218075d5a6008d82fb6f354fc6d3c51dde8904b15f4db7b14be162e04fd"
+    ],
+    "assertions": [
+      {
+        "step": 0,
+        "path": "value",
+        "equals": "decisive"
+      },
+      {
+        "step": 0,
+        "path": "passed",
+        "equals": true
+      },
+      {
+        "step": 0,
+        "path": "consensus_confidence",
+        "equals": 0.97
+      }
+    ]
+  },
+  "metadata": {
+    "author": "chimerabench",
+    "purpose": "highest-confidence-picks-outlier"
+  }
+}

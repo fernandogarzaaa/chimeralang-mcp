@@ -1,0 +1,65 @@
+{
+  "id": "deliberate-then-vote",
+  "family": "mixed-pipeline",
+  "description": "Deliberation step followed by a quantum vote across the same perspectives' content as candidate answers.",
+  "pipeline": [
+    {
+      "tool": "chimera_deliberate",
+      "args": {
+        "prompt": "what is the bug?",
+        "perspectives": [
+          {
+            "perspective": "first",
+            "content": "the parser drops trailing whitespace"
+          },
+          {
+            "perspective": "second",
+            "content": "the parser drops trailing whitespace"
+          },
+          {
+            "perspective": "third",
+            "content": "the typechecker rejects valid input"
+          }
+        ],
+        "mode": "lexical_consensus"
+      }
+    },
+    {
+      "tool": "chimera_quantum_vote",
+      "args": {
+        "responses": [
+          {
+            "answer": "parser",
+            "confidence": 0.85
+          },
+          {
+            "answer": "parser",
+            "confidence": 0.8
+          },
+          {
+            "answer": "typechecker",
+            "confidence": 0.7
+          }
+        ],
+        "timeout_s": 5.0
+      }
+    }
+  ],
+  "expected": {
+    "program_hashes": [
+      "67dbc20000458c6d285adcf6331ea8f264fcb668029f7056d1ba253708451bc9",
+      "60998e7b1219c28a033e0bb588d477ba55c7da4916d80f3eedee524e61067c5d"
+    ],
+    "assertions": [
+      {
+        "step": 0,
+        "path": "perspectives.0.perspective",
+        "equals": "first"
+      }
+    ]
+  },
+  "metadata": {
+    "author": "chimerabench",
+    "purpose": "deliberate-feeds-vote"
+  }
+}

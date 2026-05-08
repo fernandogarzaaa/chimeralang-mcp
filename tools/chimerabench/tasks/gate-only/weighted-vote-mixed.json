@@ -1,0 +1,54 @@
+{
+  "id": "weighted-vote-mixed",
+  "family": "gate-only",
+  "description": "Two votes for A (0.9 + 0.85) outweigh one for B (0.7) under weighted_vote.",
+  "pipeline": [
+    {
+      "tool": "chimera_gate",
+      "args": {
+        "candidates": [
+          {
+            "value": "A",
+            "confidence": 0.9
+          },
+          {
+            "value": "B",
+            "confidence": 0.7
+          },
+          {
+            "value": "A",
+            "confidence": 0.85
+          }
+        ],
+        "strategy": "weighted_vote",
+        "threshold": 0.6
+      }
+    }
+  ],
+  "expected": {
+    "program_hashes": [
+      "3f64b0dab9c78f9eb4cd62824cd50809b72dbd1c2e3c9888de99ef17d5147b1f"
+    ],
+    "assertions": [
+      {
+        "step": 0,
+        "path": "value",
+        "equals": "A"
+      },
+      {
+        "step": 0,
+        "path": "passed",
+        "equals": true
+      },
+      {
+        "step": 0,
+        "path": "strategy",
+        "equals": "weighted_vote"
+      }
+    ]
+  },
+  "metadata": {
+    "author": "chimerabench",
+    "purpose": "weighted-vote-correctness"
+  }
+}

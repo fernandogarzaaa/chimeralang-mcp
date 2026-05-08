@@ -1,0 +1,41 @@
+{
+  "id": "single-supported",
+  "family": "verify-pipeline",
+  "description": "Single claim with strong lexical overlap against the evidence.",
+  "pipeline": [
+    {
+      "tool": "chimera_verify",
+      "args": {
+        "claims": [
+          {
+            "text": "the user successfully logged in to the system"
+          }
+        ],
+        "evidence": [
+          "the user logged in to the system successfully at 12:00"
+        ]
+      }
+    }
+  ],
+  "expected": {
+    "program_hashes": [
+      "d0e74d084287c61700b945b8174c11103bf6861f43a7ebba8c6c87f7aea35581"
+    ],
+    "assertions": [
+      {
+        "step": 0,
+        "path": "supported",
+        "equals": true
+      },
+      {
+        "step": 0,
+        "path": "verified_claims.0.verdict",
+        "equals": "lexically_supported"
+      }
+    ]
+  },
+  "metadata": {
+    "author": "chimerabench",
+    "purpose": "single-claim-supported"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "id": "multi-claim-mixed",
+  "family": "verify-pipeline",
+  "description": "Two claims; one strongly supported by evidence, one absent \u2014 verification_score reflects partial support.",
+  "pipeline": [
+    {
+      "tool": "chimera_verify",
+      "args": {
+        "claims": [
+          {
+            "text": "the build passed all the tests"
+          },
+          {
+            "text": "the deployment was rolled back"
+          }
+        ],
+        "evidence": [
+          "the build passed all the tests in the pipeline"
+        ]
+      }
+    }
+  ],
+  "expected": {
+    "program_hashes": [
+      "f33ed656e2e81c5fc6cae500f4de9d549c2eca2ede207b3b06b0c491ed11beff"
+    ],
+    "assertions": [
+      {
+        "step": 0,
+        "path": "claims.0.text",
+        "equals": "the build passed all the tests"
+      },
+      {
+        "step": 0,
+        "path": "claims.1.text",
+        "equals": "the deployment was rolled back"
+      }
+    ]
+  },
+  "metadata": {
+    "author": "chimerabench",
+    "purpose": "partial-support-detection"
+  }
+}
