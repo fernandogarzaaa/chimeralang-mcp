@@ -1,0 +1,37 @@
+{
+  "id": "strong-consensus",
+  "family": "vote-converge",
+  "description": "Three responses with two confident yes votes outweigh one dissenting no.",
+  "pipeline": [
+    {
+      "tool": "chimera_quantum_vote",
+      "args": {
+        "responses": [
+          {
+            "answer": "yes",
+            "confidence": 0.95
+          },
+          {
+            "answer": "yes",
+            "confidence": 0.9
+          },
+          {
+            "answer": "no",
+            "confidence": 0.5
+          }
+        ],
+        "timeout_s": 5.0
+      }
+    }
+  ],
+  "expected": {
+    "program_hashes": [
+      "82e6f77208333d9d82b31da90a6a1793ef7f4623899a1dd864bd74adc8272041"
+    ],
+    "assertions": []
+  },
+  "metadata": {
+    "author": "chimerabench",
+    "purpose": "strong-consensus-vote"
+  }
+}

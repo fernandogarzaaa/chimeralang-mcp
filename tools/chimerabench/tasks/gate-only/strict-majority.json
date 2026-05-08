@@ -1,0 +1,59 @@
+{
+  "id": "strict-majority",
+  "family": "gate-only",
+  "description": "Three identical candidates collapse trivially \u2014 verifies trivial_consensus flag.",
+  "pipeline": [
+    {
+      "tool": "chimera_gate",
+      "args": {
+        "candidates": [
+          {
+            "value": "yes",
+            "confidence": 0.9
+          },
+          {
+            "value": "yes",
+            "confidence": 0.85
+          },
+          {
+            "value": "yes",
+            "confidence": 0.95
+          }
+        ],
+        "strategy": "majority",
+        "threshold": 0.5
+      }
+    }
+  ],
+  "expected": {
+    "program_hashes": [
+      "de0ad966324e590c27cef1dda65a888506b709811a6484fd1b040a68c577a6a3"
+    ],
+    "assertions": [
+      {
+        "step": 0,
+        "path": "value",
+        "equals": "yes"
+      },
+      {
+        "step": 0,
+        "path": "passed",
+        "equals": true
+      },
+      {
+        "step": 0,
+        "path": "trivial_consensus",
+        "equals": true
+      },
+      {
+        "step": 0,
+        "path": "all_unique",
+        "equals": false
+      }
+    ]
+  },
+  "metadata": {
+    "author": "chimerabench",
+    "purpose": "trivial-consensus-detection"
+  }
+}

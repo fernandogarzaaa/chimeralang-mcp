@@ -1,0 +1,41 @@
+{
+  "id": "empty-perspectives",
+  "family": "deliberate-converge",
+  "description": "Edge case \u2014 empty perspectives list returns null consensus + divergence=1.",
+  "pipeline": [
+    {
+      "tool": "chimera_deliberate",
+      "args": {
+        "prompt": "what is the right approach?",
+        "perspectives": [],
+        "mode": "lexical_consensus"
+      }
+    }
+  ],
+  "expected": {
+    "program_hashes": [
+      "70fbf86f0dc2d318be25b138df36b9e6775c95bb56d31ecbb5ca3c11f91ef915"
+    ],
+    "assertions": [
+      {
+        "step": 0,
+        "path": "consensus",
+        "equals": null
+      },
+      {
+        "step": 0,
+        "path": "perspectives",
+        "equals": []
+      },
+      {
+        "step": 0,
+        "path": "divergence",
+        "equals": 1.0
+      }
+    ]
+  },
+  "metadata": {
+    "author": "chimerabench",
+    "purpose": "empty-input-edge-case"
+  }
+}

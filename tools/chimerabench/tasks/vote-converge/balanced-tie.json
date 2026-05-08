@@ -1,0 +1,41 @@
+{
+  "id": "balanced-tie",
+  "family": "vote-converge",
+  "description": "Two responses each side, similar confidences \u2014 tests tie-handling.",
+  "pipeline": [
+    {
+      "tool": "chimera_quantum_vote",
+      "args": {
+        "responses": [
+          {
+            "answer": "ship",
+            "confidence": 0.8
+          },
+          {
+            "answer": "ship",
+            "confidence": 0.75
+          },
+          {
+            "answer": "wait",
+            "confidence": 0.8
+          },
+          {
+            "answer": "wait",
+            "confidence": 0.75
+          }
+        ],
+        "timeout_s": 5.0
+      }
+    }
+  ],
+  "expected": {
+    "program_hashes": [
+      "67afc767793d2140e69bd10d4e552c98d87db7e8bdc3c9e749b09154c927a1bd"
+    ],
+    "assertions": []
+  },
+  "metadata": {
+    "author": "chimerabench",
+    "purpose": "tie-resolution"
+  }
+}

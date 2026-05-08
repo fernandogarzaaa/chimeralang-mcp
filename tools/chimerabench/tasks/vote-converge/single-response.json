@@ -1,0 +1,29 @@
+{
+  "id": "single-response",
+  "family": "vote-converge",
+  "description": "Single response \u2014 vote degenerates but must produce deterministic provenance.",
+  "pipeline": [
+    {
+      "tool": "chimera_quantum_vote",
+      "args": {
+        "responses": [
+          {
+            "answer": "alone",
+            "confidence": 0.6
+          }
+        ],
+        "timeout_s": 5.0
+      }
+    }
+  ],
+  "expected": {
+    "program_hashes": [
+      "9799e27077dbdf1ea2b721cf96f14b25d815804a3ea37e15e070330191c3b9fe"
+    ],
+    "assertions": []
+  },
+  "metadata": {
+    "author": "chimerabench",
+    "purpose": "single-response-degenerate"
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "id": "verify-then-gate",
+  "family": "mixed-pipeline",
+  "description": "Verify a claim, then gate three confidence-weighted opinions about whether to act.",
+  "pipeline": [
+    {
+      "tool": "chimera_verify",
+      "args": {
+        "claims": [
+          {
+            "text": "the test suite passes on the main branch"
+          }
+        ],
+        "evidence": [
+          "the test suite passes on the main branch as of last commit"
+        ]
+      }
+    },
+    {
+      "tool": "chimera_gate",
+      "args": {
+        "candidates": [
+          {
+            "value": "ship",
+            "confidence": 0.9
+          },
+          {
+            "value": "ship",
+            "confidence": 0.85
+          },
+          {
+            "value": "wait",
+            "confidence": 0.6
+          }
+        ],
+        "strategy": "weighted_vote",
+        "threshold": 0.65
+      }
+    }
+  ],
+  "expected": {
+    "program_hashes": [
+      "5e46dbaaa12b53e6efb758f122b85b1f620605fb658a0dcae0583a84cd5952dc",
+      "105700755b26de8f04cb25c021906f85e9d47f027d59d19b0a3bc5c6b1849bbf"
+    ],
+    "assertions": [
+      {
+        "step": 0,
+        "path": "supported",
+        "equals": true
+      },
+      {
+        "step": 1,
+        "path": "value",
+        "equals": "ship"
+      },
+      {
+        "step": 1,
+        "path": "passed",
+        "equals": true
+      }
+    ]
+  },
+  "metadata": {
+    "author": "chimerabench",
+    "purpose": "two-step-pipeline"
+  }
+}

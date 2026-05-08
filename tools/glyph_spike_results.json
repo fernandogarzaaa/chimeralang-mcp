@@ -1,0 +1,38 @@
+{
+  "tokenizer": "tiktoken o200k_base (Claude proxy)",
+  "stems": {
+    "total_pairs": 249,
+    "glyph_one_token": 248,
+    "glyph_multi_token": 1,
+    "glyph_worse_than_english": 1,
+    "glyph_neutral": 248,
+    "glyph_better_than_english": 0,
+    "worst_offenders": [
+      {
+        "english": "different",
+        "glyph": "\u2260",
+        "eng_tokens": 1,
+        "glyph_tokens": 2,
+        "delta": -1
+      }
+    ],
+    "biggest_wins": []
+  },
+  "corpus": {
+    "n_sentences": 20,
+    "total_english_tokens": 225,
+    "total_glyph_tokens": 213,
+    "tokens_saved": 12,
+    "pct_saved_tokens": 5.3,
+    "pct_saved_chars": 30.8
+  },
+  "headroom": {
+    "multi_token_stems_used_in_corpus": 0,
+    "occurrences": {},
+    "additional_tokens_savable_if_optimized": 0
+  },
+  "decision": "PIVOT",
+  "current_pct_saved": 5.3,
+  "projected_pct_saved": 5.3,
+  "headroom_pct": 0.0
+}

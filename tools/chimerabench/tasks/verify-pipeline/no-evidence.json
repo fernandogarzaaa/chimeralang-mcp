@@ -1,0 +1,39 @@
+{
+  "id": "no-evidence",
+  "family": "verify-pipeline",
+  "description": "Claims given but no evidence \u2014 must be flagged as insufficient.",
+  "pipeline": [
+    {
+      "tool": "chimera_verify",
+      "args": {
+        "claims": [
+          {
+            "text": "the parser handles unicode emoji correctly"
+          }
+        ],
+        "evidence": []
+      }
+    }
+  ],
+  "expected": {
+    "program_hashes": [
+      "931a5dc3b1f4046794a7cab321d5f911e9ae33dce46157b60047d47696347e86"
+    ],
+    "assertions": [
+      {
+        "step": 0,
+        "path": "supported",
+        "equals": false
+      },
+      {
+        "step": 0,
+        "path": "verified_claims",
+        "equals": []
+      }
+    ]
+  },
+  "metadata": {
+    "author": "chimerabench",
+    "purpose": "no-evidence-handling"
+  }
+}

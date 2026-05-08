@@ -1,0 +1,115 @@
+# Chimera Glyph benchmark corpus (Phase 1 of BLUEPRINT.md)
+#
+# Format: one sentence per non-empty, non-comment line.
+# Domains marked with section headers; each domain has 20 sentences.
+# Comments (#) and blank lines are ignored by the harness.
+
+## DOMAIN: error / debugging
+The user reported that the build is failing on the new branch.
+The function returned a null result instead of the expected list.
+We need to check the data and run the tests before merging.
+The error in the log says the file does not exist.
+If the test fails, we should add a regression test before fixing it.
+The user wants to know how to fix the error in the function.
+The model returned an empty array when the input was malformed.
+We should retry the request because the network was slow.
+The bug is in the parser, not in the type checker.
+The build worked yesterday but is failing today after the upgrade.
+The system is throwing an error when the user submits the form.
+The result is wrong because the cache was not invalidated.
+We tried three different approaches and all of them failed.
+The error message is misleading; the real cause is in the configuration.
+The test passed locally but failed in the continuous integration pipeline.
+The data was corrupted because the file was opened in the wrong mode.
+The model fixed the error after we provided more context.
+We added a guard clause to handle the null case.
+The function calls the wrong helper when the user is not logged in.
+The build deletes the old artifacts before creating the new ones.
+
+## DOMAIN: dialogue / conversational
+Can you tell me what the function does?
+I am not sure if this is the right approach.
+Maybe we should ask the team before changing the schema.
+Yes, the model passes the tests now.
+I think the issue is in the older code path.
+What are the next steps for this project?
+We should probably wait for the review before merging.
+Have you seen the new design document?
+That is a good question; let me think about it.
+I would like to understand why this works.
+Could you walk me through the logic again?
+There is something I do not understand about the data flow.
+We will need more time to finish the migration.
+I am working on the part that handles the errors.
+Do you remember what we decided last week?
+Let me know if you find anything strange.
+We should keep the change minimal for now.
+I think we are ready to ship the feature.
+Are you sure the configuration is correct?
+That should not be a problem in production.
+
+## DOMAIN: instruction / prompt
+Read the file and write the result to a new file.
+Compress the message history before passing it to the model.
+Mark the system prompt as cacheable using the prompt cache.
+Track the tokens saved after every compression step.
+Do not include the test files in the production build.
+Generate a summary of the conversation in three bullet points.
+Find all functions that return null and add type annotations.
+Replace every occurrence of the old API with the new one.
+Run the linter on the changed files and fix any errors.
+Skip the tests that require an external network connection.
+Commit the change with a clear message describing the fix.
+Open a pull request when the feature is ready for review.
+Update the documentation to match the new behavior.
+Check the dashboard after every release to verify the metrics.
+List the files that have changed since the last deployment.
+Add a regression test for the bug we just fixed.
+Sort the results by date and limit the output to ten items.
+Convert the response to JSON before returning it to the caller.
+Write a short note explaining why we made this change.
+Send the report to the team channel when the run is complete.
+
+## DOMAIN: reasoning / explanation
+If all the tests pass, then we can ship the change to production.
+Because the cache was empty, the model had to recompute the answer.
+The error is not in the parser; it is in the type checker.
+The user is asking a question that requires reasoning across multiple files.
+We can compress the message history because most of it is repetitive.
+If the user provides a path, then we can read the file directly.
+The model returned a null because the input did not match the schema.
+The build is fast because we cache the dependencies between runs.
+This approach will not work if the data set is very large.
+We chose this design because it is easier to test in isolation.
+The result is correct, but the explanation needs to be clearer.
+If the test passes locally, it should also pass in the pipeline.
+The function fails when the user has more than one open session.
+We should retry the request because transient errors are common.
+The user expects the answer in less than a second; we are at three.
+The cache is invalidated whenever the configuration file changes.
+If we change the schema, we need to migrate the old data first.
+The bug only happens when the user is on a slow network.
+The model is wrong about the date because the timezone is missing.
+The system works correctly for most cases but fails on edge cases.
+
+## DOMAIN: prose / narrative
+The team had been working on the new feature for several weeks before they finally decided to ship it.
+After running the tests one more time, the developer noticed that a small bug had slipped through the review.
+The user opened the application, navigated to the settings page, and changed the default theme to dark mode.
+We discussed the proposal in the design review and agreed that the simpler approach was the right choice.
+The release notes describe every change in this version, including the bug fixes and the performance improvements.
+When the build finished, the system automatically deployed the new artifact to the staging environment.
+The engineer who wrote the original code was no longer on the team, so we had to reconstruct the logic from scratch.
+Although the model performed well on the benchmark, it struggled with real-world inputs that contained typos.
+The migration script ran for almost two hours before it finished updating all the records in the database.
+We decided to keep the legacy endpoint available for one more release so that older clients had time to upgrade.
+The user wanted to undo a change but the application had already saved the new state to the server.
+After the incident, the team wrote a detailed report explaining what had failed and what they would do differently.
+The new feature is hidden behind a flag so that we can roll it out gradually to a small percentage of users.
+The conversation history grew so long that the model started to forget the original instructions from the system prompt.
+We profiled the function and found that most of the time was being spent in a single line that called an expensive helper.
+The reviewer asked for a few small changes, including renaming a variable and adding a regression test for the edge case.
+When the test failed, the continuous integration pipeline automatically posted a comment on the pull request explaining what had gone wrong.
+The user had been using the application for several years and had developed strong opinions about every part of the workflow.
+We added a new option to the configuration file so that operators could choose between the old and the new behavior.
+The model returned a list of suggestions, but only the first one made sense in the context of the conversation.

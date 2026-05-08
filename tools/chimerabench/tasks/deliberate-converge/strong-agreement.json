@@ -1,0 +1,54 @@
+{
+  "id": "strong-agreement",
+  "family": "deliberate-converge",
+  "description": "Three perspectives all push the same lexical content \u2014 deliberation reports tight consensus.",
+  "pipeline": [
+    {
+      "tool": "chimera_deliberate",
+      "args": {
+        "prompt": "should we ship the patch?",
+        "perspectives": [
+          {
+            "perspective": "engineer",
+            "content": "the patch is small and the tests pass"
+          },
+          {
+            "perspective": "reviewer",
+            "content": "the patch is small and the tests pass"
+          },
+          {
+            "perspective": "ops",
+            "content": "the patch is small and the tests pass"
+          }
+        ],
+        "mode": "lexical_consensus"
+      }
+    }
+  ],
+  "expected": {
+    "program_hashes": [
+      "692f011a13ba62866a5ba8dc8b4828e8471432909975929addda39b33f9065e5"
+    ],
+    "assertions": [
+      {
+        "step": 0,
+        "path": "perspectives.0.perspective",
+        "equals": "engineer"
+      },
+      {
+        "step": 0,
+        "path": "perspectives.1.perspective",
+        "equals": "reviewer"
+      },
+      {
+        "step": 0,
+        "path": "perspectives.2.perspective",
+        "equals": "ops"
+      }
+    ]
+  },
+  "metadata": {
+    "author": "chimerabench",
+    "purpose": "lexical-consensus-on-agreement"
+  }
+}

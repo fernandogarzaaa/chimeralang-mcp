@@ -1,6 +1,6 @@
 ---
 name: chimera
-chimera_version: "0.7.2"
+chimera_version: "0.7.5"
 description: "Trigger: large document (>500 chars), build/test log, long conversation history, claim-checking, hallucination detection, multi-tool batch, or token-cost concerns. Routes each request to the smallest correct chimera_* tool subset and skips chimera entirely for prompts <200 chars with no attachments."
 ---
 
@@ -8,7 +8,7 @@ description: "Trigger: large document (>500 chars), build/test log, long convers
 
 Works for both Claude Code (via this `SKILL.md`) and Codex (via the sibling `AGENTS.md` adapter at repo root). Both agents end up running the same routing rules.
 
-The chimeralang-mcp server (currently `0.7.2`) exposes 51 tools. Routing all of them through every prompt is wasteful. The goal of this skill is: pick the smallest correct tool subset for the user's actual intent and execute the work through it.
+The chimeralang-mcp server (currently `0.7.5`) exposes 51 tools. Routing all of them through every prompt is wasteful. The goal of this skill is: pick the smallest correct tool subset for the user's actual intent and execute the work through it.
 
 ---
 
@@ -86,7 +86,15 @@ English (14 tokens): *"The user wants to know how to fix the error returned by t
 CG (≈8 tokens): `usr wnt kn fix err $rt fn.`
 Decoded English: *"User wants know fix error return function."*
 
-Token reduction: **43%** on this sentence. Across a 10-sentence representative corpus: **46.2%** average, **0.11 ms/sentence** end-to-end. See `docs/case-studies/chimera-glyph-feature.md` for the full benchmark.
+**Measured (0.7.3, 100-sentence benchmark, tiktoken o200k_base):**
+
+| Metric | Value |
+|---|---|
+| Token reduction | **−16.0%** (Glyph is longer in BPE tokens than English) |
+| Character reduction | +19.2% |
+| Decode fidelity | 0.806 (lossy by design) |
+
+The hand-crafted glyph approach cannot beat learned BPE on token cost — modern tokenizers already collapse common English to single tokens. **Glyph's value is semantic determinism, not compression:** deterministic decode (no LLM call needed), sigil-marked entities (`@MyService` is unambiguously a proper noun), explicit modality tokens (`~`/`?`/`!` for will/might/must). For actual token reduction use `chimera_optimize`, `chimera_fracture`, or `chimera_cache_mark`. See `docs/case-studies/chimera-glyph-feature.md` for the full benchmark.
 
 **Grammar cheat-sheet:**
 - No articles (`a/an/the`) — drop them.

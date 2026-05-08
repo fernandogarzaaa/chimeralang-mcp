@@ -1,0 +1,63 @@
+{
+  "id": "two-gates-chained",
+  "family": "mixed-pipeline",
+  "description": "Two independent gate calls \u2014 verifies that each step's hash is independently reproducible.",
+  "pipeline": [
+    {
+      "tool": "chimera_gate",
+      "args": {
+        "candidates": [
+          {
+            "value": "x",
+            "confidence": 0.9
+          },
+          {
+            "value": "x",
+            "confidence": 0.85
+          }
+        ],
+        "strategy": "weighted_vote",
+        "threshold": 0.5
+      }
+    },
+    {
+      "tool": "chimera_gate",
+      "args": {
+        "candidates": [
+          {
+            "value": "y",
+            "confidence": 0.7
+          },
+          {
+            "value": "z",
+            "confidence": 0.8
+          }
+        ],
+        "strategy": "highest_confidence",
+        "threshold": 0.7
+      }
+    }
+  ],
+  "expected": {
+    "program_hashes": [
+      "070f9b63796b2f50dc30dbcd282dbaa24fe16fdff606cc60a752411fe1a260f1",
+      "84a889232006e2969cb0c34a710c93c0e3eb55645a18036088d21b3854a0b617"
+    ],
+    "assertions": [
+      {
+        "step": 0,
+        "path": "value",
+        "equals": "x"
+      },
+      {
+        "step": 1,
+        "path": "value",
+        "equals": "z"
+      }
+    ]
+  },
+  "metadata": {
+    "author": "chimerabench",
+    "purpose": "independent-step-hashes"
+  }
+}
