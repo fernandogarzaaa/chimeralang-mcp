@@ -3043,6 +3043,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     return _err(f"replay program rejected: {e}")
                 inner_result = await call_tool(body["tool"], body["args"])
                 inner_payload = json.loads(inner_result.content[0].text)
+                if inner_result.isError:
+                    return _err(
+                        f"replay re-execution of {body['tool']!r} failed: {inner_payload}"
+                    )
                 return _ok({
                     "replay_dispatched": True,
                     "tool":              body["tool"],
@@ -3516,6 +3520,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     return _err(f"replay program rejected: {e}")
                 inner_result = await call_tool(body["tool"], body["args"])
                 inner_payload = json.loads(inner_result.content[0].text)
+                if inner_result.isError:
+                    return _err(
+                        f"replay re-execution of {body['tool']!r} failed: {inner_payload}"
+                    )
                 program_hash = _hash_program(source)
                 payload = {
                     "execution": {"emitted": [], "errors": [], "kind": "replay_envelope"},

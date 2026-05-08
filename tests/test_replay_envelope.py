@@ -64,6 +64,26 @@ class TestReplayModule(unittest.TestCase):
         self.assertEqual(body["tool"], "chimera_gate")
         self.assertEqual(body["args"], original_args)
 
+    def test_parse_rejects_missing_version(self):
+        import json
+        body = {"tool": "chimera_gate", "args": {}}  # no "version" key
+        source = (
+            "# CHIMERA_REPLAY_v1\n# tool: chimera_gate\n"
+            + json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n"
+        )
+        with self.assertRaises(ValueError, msg="missing version should raise"):
+            parse_replay_program(source)
+
+    def test_parse_rejects_wrong_version(self):
+        import json
+        body = {"tool": "chimera_gate", "args": {}, "version": "99"}
+        source = (
+            "# CHIMERA_REPLAY_v1\n# tool: chimera_gate\n"
+            + json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n"
+        )
+        with self.assertRaises(ValueError, msg="wrong version should raise"):
+            parse_replay_program(source)
+
 
 # ── chimera_gate ─────────────────────────────────────────────────────────
 

@@ -205,9 +205,33 @@ async def verify_and_unpack(handoff: Handoff, *, call_tool) -> VerificationResul
         )
 
     rerun_inner = rerun_payload.get("result") or {}
+    # Validate that both sides are dicts before comparing; a malformed
+    # handoff or unexpected tool response shape must not raise.
+    if not isinstance(rerun_inner, dict):
+        return VerificationResult(
+            accepted=False,
+            failure_reason=(
+                f"re-executed result is not a dict (got {type(rerun_inner).__name__!r})"
+            ),
+            tool=body["tool"], program_hash=actual_hash,
+            decoded_summary=decoded_text,
+            decoded_summary_notes=decoded_notes,
+            payload=None,
+        )
     # Compare the fields that are stable across runs. Provenance fields
     # (program / program_hash) regenerate identically by construction.
     sender_payload = handoff.payload
+    if not isinstance(sender_payload, dict):
+        return VerificationResult(
+            accepted=False,
+            failure_reason=(
+                f"handoff payload is not a dict (got {type(sender_payload).__name__!r})"
+            ),
+            tool=body["tool"], program_hash=actual_hash,
+            decoded_summary=decoded_text,
+            decoded_summary_notes=decoded_notes,
+            payload=None,
+        )
     if not _payloads_equivalent(sender_payload, rerun_inner):
         return VerificationResult(
             accepted=False,

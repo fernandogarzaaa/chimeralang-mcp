@@ -67,7 +67,14 @@ async def main() -> int:
 
     # Agent A invokes the gate.
     a_result = await srv.call_tool(SCENARIO["tool"], SCENARIO["args"])
-    a_payload = json.loads(a_result.content[0].text)
+    if a_result.isError:
+        print(f"  ERROR: gate tool returned an error")
+        return 1
+    try:
+        a_payload = json.loads(a_result.content[0].text)
+    except (json.JSONDecodeError, IndexError) as e:
+        print(f"  ERROR: could not parse gate result: {e}")
+        return 1
     print(f"  gate result: value={a_payload['value']!r}  "
           f"passed={a_payload['passed']}  conf={a_payload['consensus_confidence']}")
 
@@ -120,7 +127,14 @@ async def show_tampering() -> int:
     """Demonstrate that any wire-level mutation flips the verification."""
     banner("BONUS — TAMPERING WALK-THROUGH")
     a_result = await srv.call_tool(SCENARIO["tool"], SCENARIO["args"])
-    a_payload = json.loads(a_result.content[0].text)
+    if a_result.isError:
+        print(f"  ERROR: gate tool returned an error in tampering demo")
+        return 1
+    try:
+        a_payload = json.loads(a_result.content[0].text)
+    except (json.JSONDecodeError, IndexError) as e:
+        print(f"  ERROR: could not parse gate result: {e}")
+        return 1
     handoff = pack(
         sender=SCENARIO["sender"],
         receiver=SCENARIO["receiver"],
