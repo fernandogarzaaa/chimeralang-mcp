@@ -271,6 +271,11 @@ class TestTokenizerAwareLexicon(unittest.TestCase):
             ("usr ¬ wrk.",     "not"),
             ("usr wrk^.",      "worked"),
             ("usr rt-retry.",  "retry"),
+            # Past-tense suffix forms whose stems decode via a different
+            # English word (e.g. dø→does, hv→has) and would produce wrong
+            # results without the direct REVERSE_LEXICON lookup.
+            ("usr dø^.",       "did"),
+            ("usr hv^.",       "had"),
         ]
         for cg_text, must_contain in legacy_samples:
             english, notes = cg.decode(cg_text)
@@ -278,11 +283,12 @@ class TestTokenizerAwareLexicon(unittest.TestCase):
                           f"legacy {cg_text!r} did not decode to contain {must_contain!r}: {english!r}")
             self.assertEqual(notes, [], f"unexpected notes on {cg_text!r}: {notes}")
 
-    def test_corpus_token_savings_are_positive(self):
-        # Phase 1 acceptance gate: on a representative corpus the new
-        # lexicon must produce strictly fewer characters AND no negative
-        # token outcomes per sentence. This is a sanity floor — the formal
-        # benchmark in tools/glyph_benchmark.py owns the headline number.
+    def test_corpus_char_length_is_shorter(self):
+        # Phase 1 character-length sanity floor: on a representative corpus
+        # the new lexicon must produce strictly fewer *characters* per
+        # sentence. This is a char-length check only — the formal token-count
+        # benchmark lives in tools/glyph_benchmark.py (Phase 1 shows CG is
+        # ~16% *longer* in BPE tokens than plain English).
         corpus = [
             "The user wants to know how to fix the error in the function.",
             "The model returned a null result.",

@@ -101,6 +101,12 @@ def parse_replay_program(source: str) -> dict[str, Any]:
         raise ValueError(f"replay program targets unknown/disallowed tool: {tool!r}")
     if "args" not in body or not isinstance(body["args"], dict):
         raise ValueError("replay program must have an 'args' object")
+    version = body.get("version")
+    if version != PROGRAM_VERSION:
+        raise ValueError(
+            f"replay program version {version!r} is not supported "
+            f"(expected {PROGRAM_VERSION!r})"
+        )
     return body
 
 

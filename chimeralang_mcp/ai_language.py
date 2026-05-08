@@ -1,8 +1,15 @@
-"""Chimera Glyph (CG) — a token-efficient AI-only pidgin.
+"""Chimera Glyph (CG) — deterministic AI-to-AI wire format.
 
 Designed by the AI for AI-to-AI reasoning. Lossy and self-contained: the
 translator reconstructs *meaning*, not surface form. No symbol map needs to
 travel with the encoded text.
+
+Note: CG is *not* a token-compression scheme. BPE benchmarks (v0.7.3,
+tiktoken o200k_base) show CG is ≈16% *longer* in tokens than plain English
+on representative corpora — modern tokenisers already collapse common English
+to single tokens. CG's value is semantic determinism: sigil-marked entities,
+explicit modality tokens, and stable round-trip decode. Use chimera_optimize /
+chimera_fracture / chimera_cache_mark for actual token reduction.
 
 Public surface:
     GRAMMAR_SPEC, LEXICON, OPERATORS
@@ -19,7 +26,12 @@ import re
 # ── grammar spec (shipped to the AI as part of the directive) ────────────────
 
 GRAMMAR_SPEC = """\
-CHIMERA GLYPH (CG) — token-efficient AI language, BPE-aligned.
+CHIMERA GLYPH (CG) — deterministic AI-to-AI wire format, BPE-aware.
+
+Note: CG produces output that is ~16% *longer* in BPE tokens than plain
+English (tiktoken o200k_base benchmark, v0.7.3). Its value is semantic
+determinism and verifiable handoffs, not token compression. Use
+chimera_optimize/chimera_fracture/chimera_cache_mark for cost reduction.
 
 CORE RULES
   1. No articles: drop "a", "an", "the".
@@ -348,6 +360,15 @@ def _decode_token(tok: str, notes: list[str]) -> tuple[str, str]:
     # "going" -> "gø~" (the ~ must still be applied as future).
     if "-" in tok and tok in REVERSE_LEXICON:
         return REVERSE_LEXICON[tok], _classify(tok)
+    # Legacy suffix forms (e.g. dø^→did, hv^→had) are stored verbatim in
+    # REVERSE_LEXICON (from LEGACY_GLYPH_REVERSE). Check for an exact match
+    # for past-tense (^) tokens *before* stripping the suffix so these legacy
+    # entries take priority over the stem-lookup + _past_tense() path, which
+    # would produce wrong results for stems like dø (does → doesed) or hv
+    # (has → hased). Modal suffixes (~/?/!) are intentionally excluded so that
+    # entries like gø~ continue to decode as "will go" per the 0.7.2 contract.
+    if tok.endswith("^") and tok in REVERSE_LEXICON:
+        return REVERSE_LEXICON[tok], _classify(tok[:-1] or tok)
     # Strip a single trailing tense/modal suffix. Bare-glyph standalone
     # modals (just "~"/"?"/"!") were already handled above; here we only
     # strip when the token has a stem in front of the suffix.

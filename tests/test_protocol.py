@@ -147,6 +147,13 @@ class TestVerifyTampering(unittest.TestCase):
         self.assertFalse(v.accepted)
         self.assertIn("protocol_version", (v.failure_reason or ""))
 
+    def test_non_dict_payload_rejected(self):
+        h = _make_handoff()
+        h.payload = ["not", "a", "dict"]  # type: ignore[assignment]
+        v = self._verify(h)
+        self.assertFalse(v.accepted)
+        self.assertIn("not a dict", (v.failure_reason or "").lower())
+
 
 class TestVerifyDeterminism(unittest.TestCase):
     def test_same_inputs_same_hash_two_machines(self):

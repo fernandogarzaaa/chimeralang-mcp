@@ -1,0 +1,42 @@
+[
+  {
+    "tool": "chimera_optimize",
+    "payload": "long doc (CLAUDE.md)",
+    "note": "structural compression — drops filler, dedupes",
+    "before": 992,
+    "after": 287,
+    "saved_pct": "71.1%"
+  },
+  {
+    "tool": "chimera_compress",
+    "payload": "12-turn dialogue text (joined)",
+    "note": "contractions + symbols + filler stripping",
+    "before": 509,
+    "after": 143,
+    "saved_pct": "71.9%"
+  },
+  {
+    "tool": "chimera_fracture",
+    "payload": "long doc + 12-msg dialogue, 600-token budget",
+    "note": "single-call quality-gated mix",
+    "before": 497,
+    "after": 432,
+    "saved_pct": "13.1%"
+  },
+  {
+    "tool": "chimera_log_compress",
+    "payload": "320-line log with 1 warning, 1 error, 1 traceback",
+    "note": "head/tail + error/warning lines kept verbatim",
+    "before": 328,
+    "after": 163,
+    "saved_pct": "50.3%"
+  },
+  {
+    "tool": "chimera_cache_mark",
+    "payload": "stable ~5kB system block, repeated across calls",
+    "note": "marks cache_control: ephemeral; lossless ~90% off cached tokens on hit",
+    "before": 1215,
+    "after": 122,
+    "saved_pct": "90.0%"
+  }
+]
