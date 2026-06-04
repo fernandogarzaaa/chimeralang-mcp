@@ -1729,22 +1729,29 @@ def _verify_claims_against_evidence(
         # Default lexical path uses the Jaccard thresholds. Semantic methods
         # (nli/llm) classify the claim against evidence and override the class;
         # lexical scores are still reported for transparency.
-        tainted = bool((best_match or {}).get("tainted"))
+        best_match_tainted = bool((best_match or {}).get("tainted"))
+        # The semantic classifier reads EVERY evidence snippet, so its taint
+        # check must consider any attack-flagged evidence for this claim, not
+        # just the highest-lexical-overlap match.
+        any_evidence_tainted = bool(claim_attack_flags)
         if method == "lexical":
             if contradiction_score >= 0.8:
                 cls = "contradicted"
-            elif support_score >= 0.55 and not tainted:
+            elif support_score >= 0.55 and not best_match_tainted:
                 cls = "supported"
             else:
                 cls = "insufficient"
+            taint_for_mark = best_match_tainted
         else:
             sem = semantic.classify(claim_text, evidence_texts, method)
             evaluated["semantic"] = sem
             cls = sem["label"]
-            # Security guard: never let semantic scoring upgrade tainted
-            # (attack-flagged) evidence to "supported".
-            if cls == "supported" and tainted:
+            # Security guard: any attack-flagged evidence blocks semantic
+            # support, because the classifier considered all snippets — a benign
+            # high-overlap snippet must not mask a tainted one.
+            if cls == "supported" and any_evidence_tainted:
                 cls = "insufficient"
+            taint_for_mark = any_evidence_tainted
 
         if cls == "contradicted":
             evaluated["status"] = evaluated["verdict"] = f"{prefix}_contradicted"
@@ -1760,7 +1767,7 @@ def _verify_claims_against_evidence(
                 aggregate_matches.append(best_match)
         else:
             evaluated["status"] = evaluated["verdict"] = f"{prefix}_insufficient"
-            if tainted:
+            if taint_for_mark:
                 evaluated["tainted_evidence"] = True
             unsupported_claims.append(evaluated)
             if best_match:
