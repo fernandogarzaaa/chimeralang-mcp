@@ -14,6 +14,7 @@ from chimera.tokens import SourceSpan
 
 @dataclass
 class ASTNode:
+    """ASTNode."""
     span: SourceSpan | None = field(default=None, repr=False, kw_only=True)
 
 
@@ -28,6 +29,7 @@ class TypeExpr(ASTNode):
 
 @dataclass
 class PrimitiveType(TypeExpr):
+    """PrimitiveType."""
     name: str  # Int, Float, Bool, Text, Void
 
 
@@ -69,36 +71,43 @@ class Expr(ASTNode):
 
 @dataclass
 class IntLiteral(Expr):
+    """IntLiteral."""
     value: int
 
 
 @dataclass
 class FloatLiteral(Expr):
+    """FloatLiteral."""
     value: float
 
 
 @dataclass
 class StringLiteral(Expr):
+    """StringLiteral."""
     value: str
 
 
 @dataclass
 class BoolLiteral(Expr):
+    """BoolLiteral."""
     value: bool
 
 
 @dataclass
 class ListLiteral(Expr):
+    """ListLiteral."""
     elements: list[Expr]
 
 
 @dataclass
 class Identifier(Expr):
+    """Identifier."""
     name: str
 
 
 @dataclass
 class BinaryOp(Expr):
+    """BinaryOp."""
     op: str
     left: Expr
     right: Expr
@@ -106,24 +115,28 @@ class BinaryOp(Expr):
 
 @dataclass
 class UnaryOp(Expr):
+    """UnaryOp."""
     op: str
     operand: Expr
 
 
 @dataclass
 class CallExpr(Expr):
+    """CallExpr."""
     callee: Expr
     args: list[Expr]
 
 
 @dataclass
 class MemberExpr(Expr):
+    """MemberExpr."""
     obj: Expr
     member: str
 
 
 @dataclass
 class IfExpr(Expr):
+    """IfExpr."""
     condition: Expr
     then_body: list[Statement]
     else_body: list[Statement] | None = None
@@ -146,6 +159,7 @@ class Statement(ASTNode):
 
 @dataclass
 class ValDecl(Statement):
+    """ValDecl."""
     name: str
     type_ann: TypeExpr | None = None
     value: Expr | None = None
@@ -153,22 +167,26 @@ class ValDecl(Statement):
 
 @dataclass
 class ReturnStmt(Statement):
+    """ReturnStmt."""
     value: Expr | None = None
 
 
 @dataclass
 class ExprStmt(Statement):
+    """ExprStmt."""
     expr: Expr
 
 
 @dataclass
 class AssertStmt(Statement):
+    """AssertStmt."""
     condition: Expr
     message: str | None = None
 
 
 @dataclass
 class EmitStmt(Statement):
+    """EmitStmt."""
     value: Expr
 
 
@@ -205,16 +223,19 @@ class Constraint(ASTNode):
 
 @dataclass
 class MustConstraint(Constraint):
+    """MustConstraint."""
     expr: Expr
 
 
 @dataclass
 class AllowConstraint(Constraint):
+    """AllowConstraint."""
     capabilities: list[str]
 
 
 @dataclass
 class ForbiddenConstraint(Constraint):
+    """ForbiddenConstraint."""
     capabilities: list[str]
 
 
@@ -224,6 +245,7 @@ class ForbiddenConstraint(Constraint):
 
 @dataclass
 class Param(ASTNode):
+    """Param."""
     name: str
     type_ann: TypeExpr
 
@@ -239,6 +261,7 @@ class Declaration(ASTNode):
 
 @dataclass
 class FnDecl(Declaration):
+    """FnDecl."""
     name: str
     params: list[Param]
     return_type: TypeExpr | None = None
@@ -248,6 +271,7 @@ class FnDecl(Declaration):
 
 @dataclass
 class GateDecl(Declaration):
+    """GateDecl."""
     name: str
     params: list[Param]
     return_type: TypeExpr | None = None
@@ -260,6 +284,7 @@ class GateDecl(Declaration):
 
 @dataclass
 class GoalDecl(Declaration):
+    """GoalDecl."""
     description: str
     constraints_list: list[str] = field(default_factory=list)
     quality_axes: list[str] = field(default_factory=list)
@@ -269,6 +294,7 @@ class GoalDecl(Declaration):
 
 @dataclass
 class ReasonDecl(Declaration):
+    """ReasonDecl."""
     name: str
     params: list[Param]
     return_type: TypeExpr | None = None
@@ -285,4 +311,5 @@ class ReasonDecl(Declaration):
 
 @dataclass
 class Program(ASTNode):
+    """Program."""
     declarations: list[Declaration | Statement] = field(default_factory=list)

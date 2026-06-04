@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "description": "HaluBench v1 — hand-authored, offline, deterministic claim/evidence/label corpus for measuring chimera_verify hallucination-detection quality. Labels are gold (human-assigned). None of these triples appear in the built-in verification_gold pack, so scores reflect generalization, not memorization.",
+  "labels": ["supported", "contradicted", "insufficient"],
+  "items": [
+    {"id": "sup_geo_everest", "domain": "geography", "label": "supported", "claim": "Mount Everest is the tallest mountain above sea level.", "evidence": ["Mount Everest is Earth's highest mountain above sea level, at 8,849 metres."]},
+    {"id": "sup_sci_water", "domain": "science", "label": "supported", "claim": "Water is composed of hydrogen and oxygen.", "evidence": ["A water molecule consists of two hydrogen atoms bonded to one oxygen atom."]},
+    {"id": "sup_his_berlin", "domain": "history", "label": "supported", "claim": "The Berlin Wall fell in 1989.", "evidence": ["The Berlin Wall fell on 9 November 1989."]},
+    {"id": "sup_hea_exercise", "domain": "health", "label": "supported", "claim": "Regular exercise can lower the risk of heart disease.", "evidence": ["Studies show that regular physical exercise reduces the risk of cardiovascular heart disease."]},
+    {"id": "sup_tec_python", "domain": "tech", "label": "supported", "claim": "Python is a programming language.", "evidence": ["Python is a high-level, general-purpose programming language."]},
+    {"id": "sup_geo_amazon", "domain": "geography", "label": "supported", "claim": "The Amazon River is located in South America.", "evidence": ["The Amazon River flows through South America, mainly Brazil, Peru, and Colombia."]},
+    {"id": "sup_sci_light", "domain": "science", "label": "supported", "claim": "The speed of light is approximately 300,000 kilometres per second.", "evidence": ["Light travels in a vacuum at approximately 299,792 kilometres per second."]},
+    {"id": "sup_his_wwii", "domain": "history", "label": "supported", "claim": "World War II ended in 1945.", "evidence": ["World War II ended in 1945 with the surrender of Japan."]},
+    {"id": "sup_hea_vitc", "domain": "health", "label": "supported", "claim": "Vitamin C is found in citrus fruits.", "evidence": ["Citrus fruits such as oranges and lemons are rich in vitamin C."]},
+    {"id": "sup_tec_http", "domain": "tech", "label": "supported", "claim": "HTTP is a protocol used on the web.", "evidence": ["HTTP, the Hypertext Transfer Protocol, is the foundation of data communication on the web."]},
+
+    {"id": "con_geo_nile", "domain": "geography", "label": "contradicted", "claim": "The Nile River flows through Asia.", "evidence": ["The Nile River flows through northeastern Africa."]},
+    {"id": "con_sci_sound", "domain": "science", "label": "contradicted", "claim": "Sound travels faster than light.", "evidence": ["Light travels much faster than sound."]},
+    {"id": "con_his_greatwall", "domain": "history", "label": "contradicted", "claim": "The Great Wall of China was built in the 20th century.", "evidence": ["Construction of the Great Wall of China began more than 2,000 years ago."]},
+    {"id": "con_hea_smoking", "domain": "health", "label": "contradicted", "claim": "Smoking improves lung function.", "evidence": ["Smoking damages the lungs and reduces lung function."]},
+    {"id": "con_tec_java", "domain": "tech", "label": "contradicted", "claim": "Java and JavaScript are the same language.", "evidence": ["Java and JavaScript are distinct, unrelated programming languages."]},
+    {"id": "con_geo_australia", "domain": "geography", "label": "contradicted", "claim": "Australia is the largest continent by area.", "evidence": ["Asia is the largest continent by area, while Australia is the smallest."]},
+    {"id": "con_sci_lungs", "domain": "science", "label": "contradicted", "claim": "Humans have four lungs.", "evidence": ["Humans have two lungs, one on each side of the chest."]},
+    {"id": "con_hea_meddose", "domain": "health", "label": "contradicted", "claim": "The medication is completely safe at any dose.", "evidence": ["The medication is not safe at high doses and may cause serious harm."]},
+    {"id": "con_his_einstein", "domain": "history", "label": "contradicted", "claim": "Albert Einstein developed the theory of evolution.", "evidence": ["Charles Darwin developed the theory of evolution; Einstein developed relativity."]},
+    {"id": "con_tec_linux", "domain": "tech", "label": "contradicted", "claim": "Linux is a proprietary closed-source operating system.", "evidence": ["Linux is a free and open-source operating system."]},
+
+    {"id": "ins_geo_tokyo", "domain": "geography", "label": "insufficient", "claim": "Tokyo has a population of over 13 million people.", "evidence": ["Tokyo is the capital of Japan."]},
+    {"id": "ins_sci_boil", "domain": "science", "label": "insufficient", "claim": "The new compound boils at 215 degrees Celsius.", "evidence": ["The compound is a white crystalline solid that is soluble in water."]},
+    {"id": "ins_his_treaty", "domain": "history", "label": "insufficient", "claim": "The treaty was signed by twelve nations.", "evidence": ["The treaty established a new trade framework for the region."]},
+    {"id": "ins_hea_trial", "domain": "health", "label": "insufficient", "claim": "The trial enrolled 480 participants.", "evidence": ["The trial studied the effects of the drug on blood pressure."]},
+    {"id": "ins_tec_throughput", "domain": "tech", "label": "insufficient", "claim": "The server handles 10,000 requests per second.", "evidence": ["The server is written in Go and deployed on Kubernetes."]},
+    {"id": "ins_geo_weather", "domain": "geography", "label": "insufficient", "claim": "It rained in Seattle on the day of the launch.", "evidence": ["The launch took place at the company facility in Seattle."]},
+    {"id": "ins_sci_exo", "domain": "science", "label": "insufficient", "claim": "The reaction is exothermic.", "evidence": ["The reaction was carried out at room temperature in a sealed flask."]},
+    {"id": "ins_his_author", "domain": "history", "label": "insufficient", "claim": "The author wrote the novel while living in Paris.", "evidence": ["The novel was published in 1925 to critical acclaim."]},
+    {"id": "ins_hea_chol", "domain": "health", "label": "insufficient", "claim": "The patient's cholesterol dropped after treatment.", "evidence": ["The patient was prescribed a statin and advised to exercise regularly."]},
+    {"id": "ins_tec_downloads", "domain": "tech", "label": "insufficient", "claim": "The app has been downloaded five million times.", "evidence": ["The app is available on both iOS and Android."]}
+  ]
+}

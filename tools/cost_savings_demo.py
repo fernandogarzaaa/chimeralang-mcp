@@ -70,12 +70,14 @@ SYSTEM_BLOCK = (
 
 
 def pct(before: int, after: int) -> str:
+    """Pct."""
     if before == 0:
         return "—"
     return f"{100 * (before - after) / before:.1f}%"
 
 
 async def run() -> None:
+    """Run."""
     rows: list[tuple[str, str, str, int, int, str]] = []
 
     # ── chimera_optimize on a long doc ────────────────────────────────

@@ -1,0 +1,26 @@
+{
+  "method": "lexical",
+  "n": 30,
+  "accuracy": 0.6333,
+  "macro_f1": 0.5253,
+  "per_class": {
+    "supported": {
+      "precision": 0.5294,
+      "recall": 0.9,
+      "f1": 0.6667,
+      "support": 10
+    },
+    "contradicted": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 10
+    },
+    "insufficient": {
+      "precision": 0.8333,
+      "recall": 1.0,
+      "f1": 0.9091,
+      "support": 10
+    }
+  }
+}

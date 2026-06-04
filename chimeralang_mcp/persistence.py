@@ -1,3 +1,4 @@
+"""Persistence."""
 from __future__ import annotations
 
 import json
@@ -8,12 +9,15 @@ from typing import Any
 
 
 class PersistentNamespaceStore:
+    """PersistentNamespaceStore."""
     def __init__(self, base_dir: str | None = None) -> None:
+        """Initialize the instance."""
         root = base_dir or os.environ.get("CHIMERA_MCP_DATA_DIR")
         self._base_dir = Path(root) if root else Path.home() / ".chimeralang_mcp"
         self._base_dir.mkdir(parents=True, exist_ok=True)
 
     def load(self, kind: str, namespace: str, default: Any) -> Any:
+        """Load."""
         path = self._path(kind, namespace)
         if not path.exists():
             return default
@@ -23,6 +27,7 @@ class PersistentNamespaceStore:
             return default
 
     def save(self, kind: str, namespace: str, payload: Any) -> str:
+        """Save."""
         path = self._path(kind, namespace)
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
@@ -30,6 +35,7 @@ class PersistentNamespaceStore:
         return str(path)
 
     def append(self, kind: str, namespace: str, entry: Any, max_items: int = 200) -> str:
+        """Append."""
         items = self.load(kind, namespace, [])
         if not isinstance(items, list):
             items = []
@@ -39,9 +45,11 @@ class PersistentNamespaceStore:
         return self.save(kind, namespace, items)
 
     def path_for(self, kind: str, namespace: str) -> str:
+        """Path for."""
         return str(self._path(kind, namespace))
 
     def _path(self, kind: str, namespace: str) -> Path:
+        """Path."""
         safe_kind = self._sanitize(kind)
         safe_namespace = self._sanitize(namespace or "default")
         folder = self._base_dir / safe_kind
@@ -50,5 +58,6 @@ class PersistentNamespaceStore:
 
     @staticmethod
     def _sanitize(value: str) -> str:
+        """Sanitize."""
         cleaned = re.sub(r"[^a-zA-Z0-9_.-]+", "_", value.strip())
         return cleaned or "default"

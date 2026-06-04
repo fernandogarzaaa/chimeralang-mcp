@@ -173,6 +173,31 @@ Independent audit (2026-05-07) identified the project's **real moat**: it's the 
 
 ---
 
+## Phase 5 — Verifiable hallucination detection **[COMPLETE]**
+
+**Goal:** Give the hallucination pillar a *published number* (like Glyph's −16%) and a real semantic tier, so `chimera_verify` can catch contradictions that lexical overlap misses — without abandoning the deterministic default.
+
+**Direction (chosen):** Hybrid — keep the deterministic lexical method as the fast default, add an opt-in semantic tier, and benchmark both. The deterministic reproducibility moat (Phases 2–4) stays intact; semantic scoring is additive and optional.
+
+### Sub-tasks
+- [x] **5.1 — Baseline benchmark (HaluBench).** `tools/halubench/` ships a 30-item hand-labeled corpus (10/10/10 across supported/contradicted/insufficient, 5 domains, no `verification_gold` leakage), a runner that scores every item through the live `chimera_verify` tool, and a regression test (`tests/test_halubench.py`) that locks the numbers. **Baseline (lexical): accuracy 0.633, macro-F1 0.525.** Headline finding: **contradiction recall = 0.000** — lexical overlap catches none of the 10 contradictions because claim and evidence share vocabulary. This is the number 5.2 must beat.
+- [x] **5.2 — Optional semantic tier.** `chimera_verify` gained a `method` param (`lexical` default | `nli` | `llm`). `nli` = `cross-encoder/nli-deberta-v3-xsmall` (optional `[semantic]` extra, lazy import, deterministic); `llm` = Anthropic judge with prompt caching (optional `[llm]` extra, `ANTHROPIC_API_KEY`, non-deterministic, not hash-replayable). Verdicts are method-namespaced (`lexically_*` / `nli_*` / `llm_*`); semantic results carry `model_id` + scores. Core server still imports with only `mcp` (heavy deps load on first semantic call). **Measured on HaluBench: nli lifts accuracy 0.633→0.933, macro-F1 0.525→0.935, and contradiction recall 0.000→1.000.** Regression-guarded by `tests/test_halubench.py::TestHaluBenchNLI` + `tests/test_verify_methods.py` (skip cleanly without the extra).
+- [x] **5.3 — Calibrate `chimera_detect`.** `tools/halubench/detect_corpus.json` + `run_detect.py` measure detect's two real signals on a task-appropriate corpus (detect screens phrasing/attacks, not entailment). **Certainty: precision 1.000, recall 0.800** (catches listed markers, misses synonyms). **Injection: precision 1.000, recall 0.125** — flags the canonical "ignore all previous instructions" but misses most variants; its prompt-injection screening is narrow (trustworthy when it fires, far from complete). Locked by `tests/test_halubench.py::TestDetectBench`.
+- [x] **5.3 (RAG) — Grounded verify.** `chimera_verify` gained a `corpus` param (+ `retrieve_k`, default 3): when supplied, the top-k snippets most relevant to each claim are retrieved (deterministic token-overlap) and verified against, instead of being hand-picked. Retrieval is replay-safe (locked into the replay envelope with the corpus); the no-corpus path is byte-identical. **Measured on HaluBench (pool = all 30 snippets, each claim's evidence buried among 29 distractors): nli+rag accuracy 0.800, macro-F1 0.805, contradiction recall 1.000** — keeps most of the oracle-nli lift (0.933) and well above the 0.633 lexical baseline; the ~13-pt cost is retrieval surfacing contradicting neighbours. Guarded by `tests/test_halubench.py::TestHaluBenchRAG` + deterministic retrieval tests in `tests/test_verify_methods.py::TestGroundedVerify` (run in CI).
+
+### Success criteria
+- [x] Published lexical baseline F1, regression-locked
+- [x] NLI tier beats lexical **contradiction recall** by a measured margin (0.000 → 1.000 on HaluBench)
+- [x] Server still imports & runs with **zero** new hard dependencies (semantic/llm optional + lazy)
+- [x] Latency documented per tier (lexical sub-ms; nli ~100 ms/pair) — see `tools/halubench/README.md`
+- [x] No claim on any surface without a number behind it
+
+### What this unlocks
+- The honest end-goal becomes provable: hallucination detection with a *number*, not a vibe.
+- ChimeraBench v2 (LLM-backed tasks, anticipated in Phase 3) gets its first real entries.
+
+---
+
 ## Cross-cutting principles
 
 1. **Honest measurements only.** Every claim ("60% reduction", "deterministic", "cryptographically verifiable") must be backed by a runnable test or a published artifact. No marketing without a benchmark.
@@ -189,4 +214,4 @@ Independent audit (2026-05-07) identified the project's **real moat**: it's the 
 - `[x]` Complete
 - `[!]` Blocked / pivoting (see notes)
 
-Last updated: 2026-05-07 (Phase 1 spike in progress)
+Last updated: 2026-06-04 (Phase 5 — Verifiable hallucination detection, 5.1–5.3 complete)

@@ -30,6 +30,7 @@ from chimera.vm import ChimeraVM
 
 
 def _read_source(path_str: str) -> str:
+    """Read source."""
     p = Path(path_str)
     if not p.exists():
         print(f"chimera: error: file not found: {p}", file=sys.stderr)
@@ -40,11 +41,13 @@ def _read_source(path_str: str) -> str:
 
 
 def _lex(source: str, filename: str = "<stdin>"):
+    """Lex."""
     lexer = Lexer(source, filename)
     return lexer.tokenize()
 
 
 def _parse(source: str, filename: str = "<stdin>"):
+    """Parse."""
     tokens = _lex(source, filename)
     parser = Parser(tokens)
     return parser.parse()
@@ -177,6 +180,7 @@ def cmd_repl() -> None:
     depth = 0
 
     def _eval_buffer(lines: list[str]) -> None:
+        """Eval buffer."""
         source = "\n".join(lines)
         try:
             tokens = _lex(source)
@@ -273,6 +277,7 @@ Options:
 
 
 def main() -> None:
+    """Main."""
     args = sys.argv[1:]
     if not args or "--help" in args or "-h" in args:
         print(USAGE)

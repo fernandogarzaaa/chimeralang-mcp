@@ -71,6 +71,7 @@ class VMEnv:
     parent: VMEnv | None = None
 
     def get(self, name: str) -> ChimeraValue | None:
+        """Get."""
         if name in self.bindings:
             return self.bindings[name]
         if self.parent is not None:
@@ -78,21 +79,25 @@ class VMEnv:
         return None
 
     def set(self, name: str, value: ChimeraValue) -> None:
+        """Set."""
         self.bindings[name] = value
 
     def child(self) -> VMEnv:
+        """Child."""
         return VMEnv(parent=self)
 
 
 class ReturnSignal(Exception):
     """Control flow signal for return statements."""
     def __init__(self, value: ChimeraValue) -> None:
+        """Initialize the instance."""
         self.value = value
 
 
 class AssertionFailed(Exception):
     """Raised when a ChimeraLang assert fails."""
     def __init__(self, message: str, trace: list[str] | None = None) -> None:
+        """Initialize the instance."""
         self.trace = trace or []
         super().__init__(message)
 
@@ -118,7 +123,9 @@ class ExecutionResult:
 # ---------------------------------------------------------------------------
 
 class ChimeraVM:
+    """ChimeraVM."""
     def __init__(self, *, seed: int | None = None) -> None:
+        """Initialize the instance."""
         self._env = VMEnv()
         self._functions: dict[str, FnDecl] = {}
         self._gates: dict[str, GateDecl] = {}
@@ -131,6 +138,7 @@ class ChimeraVM:
     # ------------------------------------------------------------------
 
     def execute(self, program: Program) -> ExecutionResult:
+        """Execute."""
         start = time.perf_counter()
         try:
             # First pass: register declarations
@@ -163,6 +171,7 @@ class ChimeraVM:
     # ------------------------------------------------------------------
 
     def _register_builtins(self) -> None:
+        """Register builtins."""
         self._builtins: dict[str, Callable[..., ChimeraValue]] = {
             "confident": self._builtin_confident,
             "explore": self._builtin_explore_fn,
@@ -220,6 +229,7 @@ class ChimeraVM:
         )
 
     def _builtin_consensus(self, *args: ChimeraValue) -> ChimeraValue:
+        """Builtin consensus."""
         if args and isinstance(args[0], ConvergeValue):
             # FIX (Bug 6): consensus requires actual divergence across branches,
             # not just that branches exist. Check that branch values differ.
@@ -277,16 +287,19 @@ class ChimeraVM:
         return self._wrap(True, confidence=1.0)
 
     def _builtin_confidence_of(self, *args: ChimeraValue) -> ChimeraValue:
+        """Builtin confidence of."""
         if args:
             return self._wrap(args[0].confidence.value)
         return self._wrap(0.0)
 
     def _builtin_print(self, *args: ChimeraValue) -> ChimeraValue:
+        """Builtin print."""
         text = " ".join(str(a.raw) for a in args)
         self._trace(f"[print] {text}")
         return self._wrap(None)
 
     def _builtin_len(self, *args: ChimeraValue) -> ChimeraValue:
+        """Builtin len."""
         if args:
             raw = args[0].raw
             if isinstance(raw, (list, str)):
@@ -294,6 +307,7 @@ class ChimeraVM:
         return self._wrap(0)
 
     def _builtin_sum(self, *args: ChimeraValue) -> ChimeraValue:
+        """Builtin sum."""
         if args and isinstance(args[0].raw, list):
             items = args[0].raw
             try:
@@ -305,6 +319,7 @@ class ChimeraVM:
         return self._wrap(0)
 
     def _builtin_max_val(self, *args: ChimeraValue) -> ChimeraValue:
+        """Builtin max val."""
         if args and isinstance(args[0].raw, list) and args[0].raw:
             try:
                 return self._wrap(max(args[0].raw), confidence=args[0].confidence.value)
@@ -313,6 +328,7 @@ class ChimeraVM:
         return self._wrap(None)
 
     def _builtin_min_val(self, *args: ChimeraValue) -> ChimeraValue:
+        """Builtin min val."""
         if args and isinstance(args[0].raw, list) and args[0].raw:
             try:
                 return self._wrap(min(args[0].raw), confidence=args[0].confidence.value)
@@ -321,6 +337,7 @@ class ChimeraVM:
         return self._wrap(None)
 
     def _builtin_abs_val(self, *args: ChimeraValue) -> ChimeraValue:
+        """Builtin abs val."""
         if args and args[0].raw is not None:
             try:
                 return self._wrap(abs(args[0].raw), confidence=args[0].confidence.value)
@@ -329,6 +346,7 @@ class ChimeraVM:
         return self._wrap(None)
 
     def _builtin_floor(self, *args: ChimeraValue) -> ChimeraValue:
+        """Builtin floor."""
         import math
         if args and args[0].raw is not None:
             try:
@@ -338,6 +356,7 @@ class ChimeraVM:
         return self._wrap(None)
 
     def _builtin_ceil(self, *args: ChimeraValue) -> ChimeraValue:
+        """Builtin ceil."""
         import math
         if args and args[0].raw is not None:
             try:
@@ -347,6 +366,7 @@ class ChimeraVM:
         return self._wrap(None)
 
     def _builtin_round_val(self, *args: ChimeraValue) -> ChimeraValue:
+        """Builtin round val."""
         if args and args[0].raw is not None:
             try:
                 ndigits = int(args[1].raw) if len(args) >= 2 and args[1].raw is not None else None
@@ -504,6 +524,7 @@ class ChimeraVM:
         return self._wrap(passed, confidence=1.0)
 
     def _exec_decl(self, node: Declaration | Statement) -> None:
+        """Exec decl."""
         if isinstance(node, ValDecl):
             self._exec_val(node)
         elif isinstance(node, GoalDecl):
@@ -518,6 +539,7 @@ class ChimeraVM:
     # ------------------------------------------------------------------
 
     def _exec_stmt(self, stmt: Statement) -> None:
+        """Exec stmt."""
         if isinstance(stmt, ValDecl):
             self._exec_val(stmt)
         elif isinstance(stmt, ReturnStmt):
@@ -535,6 +557,7 @@ class ChimeraVM:
             self._eval(stmt.expr)
 
     def _exec_val(self, val: ValDecl) -> None:
+        """Exec val."""
         if val.value is not None:
             value = self._eval(val.value)
         else:
@@ -543,6 +566,7 @@ class ChimeraVM:
         self._env.set(val.name, value)
 
     def _exec_assert(self, assrt: AssertStmt) -> None:
+        """Exec assert."""
         val = self._eval(assrt.condition)
         if val.raw:
             self._result.assertions_passed += 1
@@ -555,6 +579,7 @@ class ChimeraVM:
             )
 
     def _exec_for(self, stmt: ForStmt) -> None:
+        """Exec for."""
         iterable_val = self._eval(stmt.iterable)
         raw = iterable_val.raw
         if not isinstance(raw, (list, str)):
@@ -585,6 +610,7 @@ class ChimeraVM:
     # ------------------------------------------------------------------
 
     def _eval(self, expr: Expr) -> ChimeraValue:
+        """Eval."""
         if isinstance(expr, IntLiteral):
             return self._wrap(expr.value, confidence=1.0)
         if isinstance(expr, FloatLiteral):
@@ -614,12 +640,14 @@ class ChimeraVM:
         return self._wrap(None)
 
     def _eval_ident(self, ident: Identifier) -> ChimeraValue:
+        """Eval ident."""
         val = self._env.get(ident.name)
         if val is not None:
             return val
         return self._wrap(None, confidence=0.0)
 
     def _eval_binary(self, expr: BinaryOp) -> ChimeraValue:
+        """Eval binary."""
         left = self._eval(expr.left)
         right = self._eval(expr.right)
         combined_conf = left.confidence.combine(right.confidence)
@@ -656,6 +684,7 @@ class ChimeraVM:
         )
 
     def _eval_unary(self, expr: UnaryOp) -> ChimeraValue:
+        """Eval unary."""
         operand = self._eval(expr.operand)
         if expr.op == "-":
             return ChimeraValue(raw=-operand.raw, confidence=operand.confidence,
@@ -666,6 +695,7 @@ class ChimeraVM:
         return operand
 
     def _eval_call(self, expr: CallExpr) -> ChimeraValue:
+        """Eval call."""
         args = [self._eval(a) for a in expr.args]
 
         if isinstance(expr.callee, Identifier):
@@ -728,6 +758,7 @@ class ChimeraVM:
         return self._wrap(None)
 
     def _eval_member(self, expr: MemberExpr) -> ChimeraValue:
+        """Eval member."""
         obj = self._eval(expr.obj)
         if expr.member == "confidence":
             return self._wrap(obj.confidence.value)
@@ -738,6 +769,7 @@ class ChimeraVM:
         return self._wrap(None)
 
     def _eval_if(self, expr: IfExpr) -> ChimeraValue:
+        """Eval if."""
         cond = self._eval(expr.condition)
         scope = self._env.child()
         old_env = self._env
@@ -756,6 +788,7 @@ class ChimeraVM:
         return self._wrap(None)
 
     def _eval_match(self, expr: MatchExpr) -> ChimeraValue:
+        """Eval match."""
         subject = self._eval(expr.subject)
         self._trace(f"[match] subject={subject.raw!r}")
         for arm in expr.arms:
@@ -834,6 +867,7 @@ class ChimeraVM:
     # ------------------------------------------------------------------
 
     def _call_fn(self, fn: FnDecl, args: list[ChimeraValue]) -> ChimeraValue:
+        """Call fn."""
         scope = self._env.child()
         for param, arg in zip(fn.params, args):
             scope.set(param.name, arg)
@@ -855,6 +889,7 @@ class ChimeraVM:
     # ------------------------------------------------------------------
 
     def _call_gate(self, gate: GateDecl, args: list[ChimeraValue]) -> ChimeraValue:
+        """Call gate."""
         self._trace(f"[gate] Spawning {gate.branches} branches for '{gate.name}'")
         branches: list[ChimeraValue] = []
 
@@ -922,6 +957,7 @@ class ChimeraVM:
         strategy: str,
         threshold: float,
     ) -> ChimeraValue:
+        """Collapse."""
         if not branches:
             return self._wrap(None, confidence=0.0)
 
@@ -975,6 +1011,7 @@ class ChimeraVM:
     # ------------------------------------------------------------------
 
     def _exec_goal(self, goal: GoalDecl) -> None:
+        """Exec goal."""
         self._trace(f'[goal] Pursuing: "{goal.description}"')
         self._trace(f"[goal] Budget: {goal.explore_budget}, Constraints: {goal.constraints_list}")
         scope = self._env.child()
@@ -994,7 +1031,9 @@ class ChimeraVM:
     # ------------------------------------------------------------------
 
     def _exec_reason(self, reason: ReasonDecl) -> None:
+        """Exec reason."""
         def _invoke(*args: ChimeraValue) -> ChimeraValue:
+            """Invoke."""
             self._trace(f"[reason] Starting reasoning with given: {reason.given}")
             scope = self._env.child()
             for param, arg in zip(reason.params, args):
@@ -1019,6 +1058,7 @@ class ChimeraVM:
     # ------------------------------------------------------------------
 
     def _wrap(self, raw: Any, confidence: float = 1.0) -> ChimeraValue:
+        """Wrap."""
         return ChimeraValue(
             raw=raw,
             confidence=Confidence(confidence, "literal"),
@@ -1026,4 +1066,5 @@ class ChimeraVM:
         )
 
     def _trace(self, msg: str) -> None:
+        """Trace."""
         self._result.trace.append(msg)

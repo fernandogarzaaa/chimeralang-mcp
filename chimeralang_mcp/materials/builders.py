@@ -1,3 +1,4 @@
+"""Builders."""
 from __future__ import annotations
 
 import json
@@ -512,6 +513,7 @@ _HALLUCINATION_EVAL: list[dict[str, Any]] = [
 
 
 def build_source_manifest() -> dict[str, Any]:
+    """Build source manifest."""
     return {
         "manifest_version": MANIFEST_VERSION,
         "generated_at": GENERATED_AT,
@@ -521,6 +523,7 @@ def build_source_manifest() -> dict[str, Any]:
 
 
 def build_core_pack(manifest: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Build core pack."""
     manifest = manifest or build_source_manifest()
     return {
         "pack_id": "chimera-core-materials",
@@ -542,6 +545,7 @@ def build_license_report(
     manifest: dict[str, Any] | None = None,
     core_pack: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Build license report."""
     manifest = manifest or build_source_manifest()
     core_pack = core_pack or build_core_pack(manifest)
     pack_counts = {name: len(records) for name, records in core_pack["packs"].items()}
@@ -568,6 +572,7 @@ def build_license_report(
 
 
 def _filter_pack_records(core_pack: dict[str, Any], bundle_scope: str) -> dict[str, Any]:
+    """Filter pack records."""
     packs: dict[str, list[dict[str, Any]]] = {}
     for pack_type, records in core_pack["packs"].items():
         filtered: list[dict[str, Any]] = []
@@ -591,6 +596,7 @@ def build_status_report(
     core_pack: dict[str, Any] | None = None,
     sync_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Build status report."""
     manifest = manifest or build_source_manifest()
     core_pack = core_pack or build_core_pack(manifest)
     materials_dir = base_dir / "materials"
@@ -627,6 +633,7 @@ def build_status_report(
 
 
 def build_external_packs(base_dir: Path) -> dict[str, Any]:
+    """Build external packs."""
     manifest = build_source_manifest()
     core_pack = build_core_pack(manifest)
     license_report = build_license_report(manifest, core_pack)
@@ -661,6 +668,7 @@ def build_external_packs(base_dir: Path) -> dict[str, Any]:
 
 
 def sync_source_metadata(base_dir: Path) -> dict[str, Any]:
+    """Sync source metadata."""
     manifest = build_source_manifest()
     materials_dir = base_dir / "materials"
     materials_dir.mkdir(parents=True, exist_ok=True)
@@ -728,6 +736,7 @@ def sync_source_metadata(base_dir: Path) -> dict[str, Any]:
 
 
 def _fetch_json(url: str) -> dict[str, Any]:
+    """Fetch json."""
     request = urllib.request.Request(
         url,
         headers={
@@ -740,6 +749,7 @@ def _fetch_json(url: str) -> dict[str, Any]:
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
+    """Read json."""
     if not path.exists():
         return None
     try:
@@ -749,4 +759,5 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def _write_json(path: Path, payload: Any) -> None:
+    """Write json."""
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")

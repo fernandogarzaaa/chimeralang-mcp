@@ -29,6 +29,7 @@ TASKS_DIR = Path(__file__).parent / "tasks"
 
 @dataclass
 class StepResult:
+    """StepResult."""
     tool: str
     is_error: bool
     payload: dict[str, Any]
@@ -39,6 +40,7 @@ class StepResult:
 
 @dataclass
 class TaskResult:
+    """TaskResult."""
     task_id: str
     family: str
     passed: bool
@@ -48,6 +50,7 @@ class TaskResult:
 
 @dataclass
 class BenchSummary:
+    """BenchSummary."""
     total: int = 0
     passed: int = 0
     failed: int = 0
@@ -72,6 +75,7 @@ def _path_get(payload: dict, path: str) -> Any:
 
 
 def _load_tasks(filter_substr: str | None = None) -> list[dict]:
+    """Load tasks."""
     tasks: list[dict] = []
     for path in sorted(TASKS_DIR.rglob("*.json")):
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -84,6 +88,7 @@ def _load_tasks(filter_substr: str | None = None) -> list[dict]:
 
 
 async def _run_step(step: dict) -> tuple[bool, dict]:
+    """Run step."""
     result = await srv.call_tool(step["tool"], step["args"])
     payload = json.loads(result.content[0].text)
     return result.isError, payload
@@ -157,6 +162,7 @@ async def run_task(task: dict, *, update_canonical: bool = False) -> TaskResult:
 
 async def run_all(*, filter_substr: str | None = None,
                   update_canonical: bool = False) -> BenchSummary:
+    """Run all."""
     summary = BenchSummary()
     tasks = _load_tasks(filter_substr=filter_substr)
     for task in tasks:
@@ -175,6 +181,7 @@ async def run_all(*, filter_substr: str | None = None,
 
 
 def print_report(summary: BenchSummary, verbose: bool = False) -> None:
+    """Print report."""
     print("=" * 72)
     print(f"CHIMERABENCH — {summary.total} tasks, "
           f"{summary.passed} passed, {summary.failed} failed")
@@ -199,6 +206,7 @@ def print_report(summary: BenchSummary, verbose: bool = False) -> None:
 
 
 def main() -> None:
+    """Main."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--update", action="store_true",
                         help="Regenerate canonical hashes in task JSON files")

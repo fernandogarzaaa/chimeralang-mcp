@@ -1,6 +1,6 @@
 # Codex Agent Guide — chimeralang-mcp
 
-> **chimera_version: 0.7.6** — keep this in sync with `pyproject.toml` and `.claude/skills/chimera/SKILL.md`.
+> **chimera_version: 0.8.0** — keep this in sync with `pyproject.toml` and `.claude/skills/chimera/SKILL.md`.
 
 This file is the Codex-readable adapter of the **chimera skill**. The canonical version lives at `.claude/skills/chimera/SKILL.md`; this is the same routing matrix in the location Codex actually walks.
 
@@ -10,7 +10,7 @@ When Codex is operating inside this repository, follow these rules.
 
 ## When to invoke chimeralang-mcp
 
-The chimeralang-mcp server (currently `0.7.6`) exposes 51 tools. Pick the smallest correct subset for the user's actual intent — never invoke all of them.
+The chimeralang-mcp server (currently `0.8.0`) exposes 51 tools. Pick the smallest correct subset for the user's actual intent — never invoke all of them.
 
 **Skip chimera tools entirely** if:
 - Prompt is `< 200` chars and has no attached document/log/history.
@@ -123,7 +123,7 @@ chimera_csm → chimera_mode(task_description="analyze competing designs")
 
 **4. Claim verification**
 ```
-chimera_csm → chimera_claims(text=<claim>) → chimera_verify(claims=[...], evidence=<source>)
+chimera_csm → chimera_claims(text=<claim>) → chimera_verify(claims=[...], evidence=<source>, method=lexical|nli|llm)
 → chimera_detect(text=<claim>)
 ```
 

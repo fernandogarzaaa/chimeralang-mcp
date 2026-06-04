@@ -1,6 +1,6 @@
 ---
 name: chimera
-chimera_version: "0.7.6"
+chimera_version: "0.8.0"
 description: "Trigger: large document (>500 chars), build/test log, long conversation history, claim-checking, hallucination detection, multi-tool batch, or token-cost concerns. Routes each request to the smallest correct chimera_* tool subset and skips chimera entirely for prompts <200 chars with no attachments."
 ---
 
@@ -8,7 +8,7 @@ description: "Trigger: large document (>500 chars), build/test log, long convers
 
 Works for both Claude Code (via this `SKILL.md`) and Codex (via the sibling `AGENTS.md` adapter at repo root). Both agents end up running the same routing rules.
 
-The chimeralang-mcp server (currently `0.7.6`) exposes 51 tools. Routing all of them through every prompt is wasteful. The goal of this skill is: pick the smallest correct tool subset for the user's actual intent and execute the work through it.
+The chimeralang-mcp server (currently `0.8.0`) exposes 51 tools. Routing all of them through every prompt is wasteful. The goal of this skill is: pick the smallest correct tool subset for the user's actual intent and execute the work through it.
 
 ---
 
@@ -59,7 +59,7 @@ Common mistakes that cause tool errors:
 | Trigger | First-choice tool | Notes |
 |---|---|---|
 | Extract claims from text | `chimera_claims` | Returns atomic claims with hedge/abstention tags. |
-| Verify claims against evidence | `chimera_verify` | Lexical token-overlap scoring. |
+| Verify claims against evidence | `chimera_verify` | `method=lexical` (default): token-overlap, fast, no deps. `method=nli`: cross-encoder entailment/contradiction (needs `[semantic]` extra) — use when you need real contradiction detection. `method=llm`: Anthropic judge (needs `[llm]` extra + key), non-deterministic. |
 | Multi-perspective analysis | `chimera_deliberate` | Multiple perspective passes. |
 | Confidence-weighted vote across N answers | `chimera_quantum_vote` | Use when you have multiple candidate responses. |
 | Collapse candidates into one consensus | `chimera_gate` | Lighter than `quantum_vote`. |
@@ -154,7 +154,7 @@ User: "Analyze these 3 competing API designs"
 User: "Is this claim accurate?" + source text
 → chimera_csm
 → chimera_claims(text=<claim_text>)                               # extract atomic claims
-→ chimera_verify(claims=[...], evidence=<source_text>)            # token-overlap scoring
+→ chimera_verify(claims=[...], evidence=<source_text>)            # method=lexical (default) | nli | llm
 → chimera_detect(text=<claim_text>)                               # MCP attack / injection check
 ```
 

@@ -264,6 +264,7 @@ OPERATORS: dict[str, str] = {
 # new mappings win for any stem the encoder still emits, while legacy stems
 # (no longer produced by encode()) remain decodable.
 def _build_reverse_lexicon() -> dict[str, str]:
+    """Build reverse lexicon."""
     rev: dict[str, str] = dict(LEGACY_GLYPH_REVERSE)
     for eng, cg in LEXICON.items():
         if not cg:
@@ -404,6 +405,7 @@ def _decode_token(tok: str, notes: list[str]) -> tuple[str, str]:
 
 
 def _classify(stem: str) -> str:
+    """Classify."""
     if stem in _PRONOUN_TOKENS:
         return "pron"
     if stem in _CONNECTIVE_TOKENS:
@@ -420,6 +422,7 @@ def _classify(stem: str) -> str:
 
 
 def _past_tense(word: str) -> str:
+    """Past tense."""
     irregular = {
         "go": "went", "do": "did", "have": "had", "make": "made",
         "say": "said", "see": "saw", "get": "got", "give": "gave",
@@ -540,10 +543,12 @@ def directive(style: str = "strict", task_hint: str | None = None) -> str:
 # ── savings estimator ────────────────────────────────────────────────────────
 
 def _estimate_tokens(s: str) -> int:
+    """Estimate tokens."""
     return max(0, len(s) // 4)
 
 
 def estimate_savings(english: str) -> dict:
+    """Estimate savings."""
     glyph = encode(english)
     en_tok = _estimate_tokens(english)
     cg_tok = _estimate_tokens(glyph)

@@ -27,6 +27,7 @@ class ConfidenceLevel(Enum):
 
 
 class MemoryScope(Enum):
+    """MemoryScope."""
     EPHEMERAL = auto()    # dies when scope exits
     PERSISTENT = auto()   # survives across executions
     PROVISIONAL = auto()  # held until contradicted
@@ -41,6 +42,7 @@ class Confidence:
 
     @property
     def level(self) -> ConfidenceLevel:
+        """Level."""
         if self.value >= 0.95:
             return ConfidenceLevel.HIGH
         if self.value >= 0.5:
@@ -72,6 +74,7 @@ class ChimeraValue:
     trace: list[str] = field(default_factory=list)
 
     def _compute_fingerprint(self) -> str:
+        """Compute fingerprint."""
         data = f"{type(self.raw).__name__}:{self.raw}:{self.confidence.value}"
         return hashlib.sha256(data.encode()).hexdigest()[:16]
 
@@ -85,6 +88,7 @@ class ChimeraValue:
 class ConfidentValue(ChimeraValue):
     """Value with >= 0.95 confidence. Assertion fails on creation if below."""
     def __post_init__(self) -> None:
+        """Run post-initialization setup."""
         if self.confidence.value < 0.95:
             raise ConfidenceViolation(
                 f"Confident<> requires confidence >= 0.95, got {self.confidence.value}"
@@ -110,6 +114,7 @@ class ProvisionalValue(ChimeraValue):
     revoked: bool = False
 
     def revoke(self) -> ProvisionalValue:
+        """Revoke."""
         return ProvisionalValue(
             raw=self.raw,
             confidence=Confidence(0.0, "revoked"),

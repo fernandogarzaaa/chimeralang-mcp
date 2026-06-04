@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chimeralang-mcp"
-version = "0.7.6"
+version = "0.8.0"
 description = "ChimeraLang MCP Server — probabilistic types, consensus gates, and hallucination detection as Claude tools"
 readme = "README.md"
 license = { text = "MIT" }
@@ -26,6 +26,8 @@ dependencies = ["mcp>=1.0.0"]
 sync = ["datasets>=2.20.0", "huggingface_hub>=0.23.0"]
 eval = ["pytest>=8.0.0"]
 conformance = ["uvicorn>=0.30.0", "starlette>=0.37.0"]
+semantic = ["sentence-transformers>=3.0.0"]
+llm = ["anthropic>=0.40.0"]
 dev = ["build>=1.2.1", "pytest>=8.0.0", "uvicorn>=0.30.0", "starlette>=0.37.0"]
 
 [project.scripts]

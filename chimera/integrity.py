@@ -36,12 +36,14 @@ class ReasoningChain:
 
     @property
     def root_hash(self) -> str:
+        """Root hash."""
         if not self.links:
             return hashlib.sha256(b"empty").hexdigest()[:32]
         return self.links[-1].hash
 
     @property
     def length(self) -> int:
+        """Length."""
         return len(self.links)
 
 
@@ -50,6 +52,7 @@ class ChainBuilder:
 
     @staticmethod
     def build(trace: list[str]) -> ReasoningChain:
+        """Build."""
         chain = ReasoningChain()
         prev = "genesis"
         for i, entry in enumerate(trace):
@@ -89,6 +92,7 @@ class GateCertificate:
     hash: str = ""
 
     def __post_init__(self) -> None:
+        """Run post-initialization setup."""
         data = json.dumps({
             "gate": self.gate_name,
             "branches": self.branches,
@@ -115,6 +119,7 @@ class IntegrityReport:
     duration_ms: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
+        """To dict."""
         return {
             "timestamp": self.timestamp,
             "program_hash": self.program_hash,
@@ -155,6 +160,7 @@ class IntegrityReport:
         }
 
     def to_json(self) -> str:
+        """To json."""
         return json.dumps(self.to_dict(), indent=2)
 
 
@@ -167,6 +173,7 @@ class IntegrityEngine:
         detection_report: DetectionReport,
         source_code: str = "",
     ) -> IntegrityReport:
+        """Certify."""
         report = IntegrityReport()
         report.duration_ms = exec_result.duration_ms
 
@@ -204,6 +211,7 @@ class IntegrityEngine:
 
     @staticmethod
     def _compute_verdict(report: IntegrityReport) -> str:
+        """Compute verdict."""
         if report.assertions_failed > 0:
             return "FAIL — assertion failures"
         if not report.chain_valid:
