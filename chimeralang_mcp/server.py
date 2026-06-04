@@ -1604,6 +1604,50 @@ def _normalize_claim_input(claim: Any) -> dict[str, Any]:
     return {"text": str(claim)}
 
 
+def _retrieve_evidence(
+    claims: list[Any],
+    corpus: list[Any],
+    k: int,
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Deterministic lexical retrieval for grounded verify (RAG path).
+
+    For each claim, rank the corpus documents by claim-token overlap and keep
+    the top-k. Returns (deduped retrieved-evidence texts in retrieval order,
+    per-claim retrieval metadata). Retrieval is pure token overlap — no model,
+    no network — so it is reproducible and replay-safe.
+    """
+    corpus_texts = [_evidence_text(doc) for doc in corpus]
+    corpus_tokens = [_tokenize_for_match(t) for t in corpus_texts]
+    retrieval: list[dict[str, Any]] = []
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for ci, claim in enumerate(claims):
+        claim_text = str(_normalize_claim_input(claim).get("text", "")).strip()
+        claim_tokens = _tokenize_for_match(claim_text)
+        denom = max(len(claim_tokens), 1)
+        scored = [
+            (len(claim_tokens & corpus_tokens[di]) / denom, di)
+            for di in range(len(corpus_texts))
+        ]
+        scored = [pair for pair in scored if pair[0] > 0]
+        scored.sort(key=lambda pair: (-pair[0], pair[1]))
+        top = scored[: max(1, k)]
+        retrieval.append({
+            "claim_index": ci,
+            "retrieved": [
+                {"corpus_index": di, "score": round(score, 4),
+                 "preview": corpus_texts[di][:160]}
+                for score, di in top
+            ],
+        })
+        for _, di in top:
+            text = corpus_texts[di]
+            if text not in seen:
+                seen.add(text)
+                ordered.append(text)
+    return ordered, retrieval
+
+
 def _verify_method_note(method: str) -> str:
     if method == "nli":
         return (
@@ -2112,6 +2156,20 @@ async def list_tools() -> list[Tool]:
                     "text": {"type": "string", "description": "Optional raw text used to derive claims."},
                     "envelope": {"description": "Optional envelope containing value or claims to verify."},
                     "evidence": {"type": "array", "description": "Evidence snippets or objects with text/content fields."},
+                    "corpus": {
+                        "type": "array",
+                        "description": (
+                            "Optional document pool for grounded verify (RAG). When supplied, "
+                            "the top retrieve_k snippets most relevant to each claim are retrieved "
+                            "(deterministic token-overlap) and used as evidence — you don't have to "
+                            "hand-pick the exact evidence. Merged with any explicit 'evidence'."
+                        ),
+                    },
+                    "retrieve_k": {
+                        "type": "integer",
+                        "default": 3,
+                        "description": "Number of corpus snippets to retrieve per claim (grounded verify).",
+                    },
                     "method": {
                         "type": "string",
                         "enum": ["lexical", "nli", "llm"],
@@ -3832,7 +3890,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             if not claims:
                 return _err("chimera_verify requires claims, text, or an envelope with claims")
 
-            evidence = list(arguments.get("evidence") or [])
+            evidence_input = list(arguments.get("evidence") or [])
+            corpus = list(arguments.get("corpus") or [])
+            try:
+                retrieve_k = int(arguments.get("retrieve_k") or 3)
+            except (TypeError, ValueError):
+                retrieve_k = 3
             method = str(arguments.get("method") or "lexical")
             if method not in {"lexical", "nli", "llm"}:
                 return _err(f"chimera_verify: unknown method {method!r} (use lexical|nli|llm)")
@@ -3845,6 +3908,22 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 if method == "llm":
                     hint += " and set ANTHROPIC_API_KEY"
                 return _err(hint)
+
+            # Grounded verify (RAG path): when a corpus is supplied, retrieve the
+            # most relevant snippets per claim and verify against those (merged
+            # with any explicitly supplied evidence). Retrieval is deterministic.
+            retrieval_meta = None
+            if corpus:
+                retrieved, retrieval_meta = _retrieve_evidence(claims, corpus, retrieve_k)
+                evidence = []
+                seen_ev: set[str] = set()
+                for item in [_evidence_text(e) for e in evidence_input] + retrieved:
+                    if item not in seen_ev:
+                        seen_ev.add(item)
+                        evidence.append(item)
+            else:
+                evidence = evidence_input
+
             verification = _verify_claims_against_evidence(claims, evidence, method=method)
             envelope = ResultEnvelope.coerce(
                 incoming if incoming is not None else {"claims": claims},
@@ -3921,7 +4000,13 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 provenance = {"replayable": False, "tool": "chimera_verify",
                               "reason": "llm method is non-deterministic"}
             else:
-                replay_args = {"claims": claims, "evidence": evidence}
+                # Lock the original inputs (not the merged evidence) plus the
+                # corpus, so a replay re-runs the same deterministic retrieval.
+                # The plain lexical/no-corpus path keeps byte-identical hashes.
+                replay_args = {"claims": claims, "evidence": evidence_input}
+                if corpus:
+                    replay_args["corpus"] = corpus
+                    replay_args["retrieve_k"] = retrieve_k
                 if method != "lexical":
                     replay_args["method"] = method
                 replay_program = _build_replay_program("chimera_verify", replay_args)
@@ -3931,13 +4016,17 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     "replayable":   True,
                     "tool":         "chimera_verify",
                 }
-            return _ok({
+            result = {
                 "claims": claims,
                 **verification,
                 "namespace": namespace,
                 "envelope": envelope.to_dict(),
                 "provenance": provenance,
-            })
+            }
+            if retrieval_meta is not None:
+                result["retrieval"] = retrieval_meta
+                result["retrieved_evidence_count"] = len(evidence)
+            return _ok(result)
 
         elif name == "chimera_provenance_merge":
             namespace = _state_namespace(arguments)

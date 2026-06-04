@@ -90,5 +90,49 @@ class TestVerifyMethods(unittest.TestCase):
         self.assertTrue(downgraded.get("tainted_evidence"))
 
 
+class TestGroundedVerify(unittest.TestCase):
+    """Phase 5.3 RAG: corpus retrieval. Deterministic (lexical) — runs in CI."""
+
+    POOL = [
+        "The Great Barrier Reef lies off the coast of Australia.",
+        "Mount Everest is Earth's highest mountain above sea level, at 8,849 metres.",
+        "Python is a high-level programming language.",
+        "The Pacific Ocean is the largest and deepest ocean on Earth.",
+    ]
+
+    def test_corpus_retrieves_relevant_evidence(self):
+        is_err, payload = _call({
+            "claims": ["Mount Everest is the tallest mountain above sea level."],
+            "corpus": self.POOL,
+        })
+        self.assertFalse(is_err)
+        # The Everest doc (index 1) must be the top retrieval.
+        top = payload["retrieval"][0]["retrieved"][0]
+        self.assertEqual(top["corpus_index"], 1)
+        self.assertEqual(payload["verdict"], "lexically_supported")
+        self.assertGreaterEqual(payload["retrieved_evidence_count"], 1)
+
+    def test_corpus_call_is_replayable_and_locks_corpus(self):
+        _, payload = _call({"claims": ["Python is a programming language."],
+                            "corpus": self.POOL})
+        prov = payload["provenance"]
+        self.assertTrue(prov["replayable"])
+        self.assertIn("program_hash", prov)
+
+    def test_no_corpus_has_no_retrieval_key(self):
+        _, payload = _call(dict(CONTRA))
+        self.assertNotIn("retrieval", payload)
+        self.assertNotIn("retrieved_evidence_count", payload)
+
+    def test_irrelevant_corpus_yields_insufficient(self):
+        _, payload = _call({
+            "claims": ["The mitochondria is the powerhouse of the cell."],
+            "corpus": ["Stock markets fell sharply on Tuesday.",
+                       "The recipe calls for two cups of flour."],
+        })
+        # Nothing relevant retrieved -> not supported.
+        self.assertNotEqual(payload["verdict"], "lexically_supported")
+
+
 if __name__ == "__main__":
     unittest.main()

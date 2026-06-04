@@ -103,6 +103,24 @@ class TestHaluBenchNLI(unittest.TestCase):
         self.assertGreater(self.summary["macro_f1"], 0.80)
 
 
+@unittest.skipUnless(semantic.available("nli"),
+                     "nli method unavailable ([semantic] extra not installed)")
+class TestHaluBenchRAG(unittest.TestCase):
+    """Phase 5.3 RAG: grounded verify retrieves evidence from a shared pool
+    instead of being handed the exact snippet. Retrieval costs some accuracy vs
+    oracle nli (0.933) but must still clear the lexical baseline (0.633)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.summary = asyncio.run(run("nli", verbose=False, rag=True))
+
+    def test_rag_beats_lexical_baseline(self):
+        self.assertGreater(self.summary["accuracy"], 0.70)
+
+    def test_rag_keeps_contradiction_recall_high(self):
+        self.assertGreaterEqual(self.summary["per_class"]["contradicted"]["recall"], 0.8)
+
+
 class TestDetectBench(unittest.TestCase):
     """Phase 5.3: calibrate chimera_detect's two signals. Deterministic — no
     optional deps. Locks both the strength (high-precision certainty flagging)

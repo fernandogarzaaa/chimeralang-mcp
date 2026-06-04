@@ -41,8 +41,14 @@ def _normalize_verdict(verdict: str) -> str:
     return verdict
 
 
-async def _predict(item: dict, method: str) -> str:
-    args: dict[str, Any] = {"claims": [item["claim"]], "evidence": item["evidence"]}
+async def _predict(item: dict, method: str, rag_pool: list[str] | None = None) -> str:
+    args: dict[str, Any] = {"claims": [item["claim"]]}
+    if rag_pool is not None:
+        # Grounded verify: no hand-picked evidence — the right snippet is buried
+        # in the shared pool and must be retrieved.
+        args["corpus"] = rag_pool
+    else:
+        args["evidence"] = item["evidence"]
     if method != "lexical":
         args["method"] = method
     result = await srv.call_tool("chimera_verify", args)
@@ -93,13 +99,16 @@ def _confusion(rows: list[tuple[str, str]]) -> dict[str, dict[str, int]]:
     return matrix
 
 
-async def run(method: str, verbose: bool) -> dict[str, Any]:
+async def run(method: str, verbose: bool, rag: bool = False) -> dict[str, Any]:
     corpus = json.loads(CORPUS.read_text(encoding="utf-8"))
     items = corpus["items"]
+    # In RAG mode, the evidence pool is every item's evidence — so each claim's
+    # correct snippet sits among 29 others and must be retrieved, not supplied.
+    rag_pool = [ev for it in items for ev in it["evidence"]] if rag else None
     rows: list[tuple[str, str]] = []
     per_item: list[dict[str, str]] = []
     for item in items:
-        pred = await _predict(item, method)
+        pred = await _predict(item, method, rag_pool)
         rows.append((item["label"], pred))
         per_item.append({"id": item["id"], "gold": item["label"], "pred": pred,
                          "ok": item["label"] == pred})
@@ -107,7 +116,7 @@ async def run(method: str, verbose: bool) -> dict[str, Any]:
             mark = "✓" if item["label"] == pred else "✗"
             print(f"  {mark} {item['id']:<22} gold={item['label']:<13} pred={pred}")
     summary = _metrics(rows)
-    summary["method"] = method
+    summary["method"] = f"{method}+rag" if rag else method
     summary["confusion"] = _confusion(rows)
     summary["per_item"] = per_item
     return summary
@@ -139,17 +148,19 @@ def main() -> int:
     parser.add_argument("--method", default="lexical",
                         help="verify scoring method (lexical|nli|llm); default lexical")
     parser.add_argument("--verbose", action="store_true", help="print per-item predictions")
+    parser.add_argument("--rag", action="store_true",
+                        help="grounded verify: retrieve evidence from a shared pool instead of supplying it")
     parser.add_argument("--update", action="store_true",
-                        help="write baseline_results.json from this run")
+                        help="write a results snapshot from this run")
     args = parser.parse_args()
 
-    summary = asyncio.run(run(args.method, args.verbose))
+    summary = asyncio.run(run(args.method, args.verbose, rag=args.rag))
     _print_report(summary)
 
     if args.update:
         snapshot = {k: summary[k] for k in ("method", "n", "accuracy", "macro_f1", "per_class")}
-        out = BASELINE if args.method == "lexical" else (
-            BASELINE.parent / f"results_{args.method}.json")
+        tag = summary["method"].replace("+", "_")
+        out = BASELINE if tag == "lexical" else (BASELINE.parent / f"results_{tag}.json")
         out.write_text(json.dumps(snapshot, indent=2) + "\n", encoding="utf-8")
         print(f"\nWrote results -> {out.relative_to(REPO)}")
     return 0

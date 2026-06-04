@@ -92,6 +92,28 @@ installed, e.g. CI).
 A third method, `llm` (Anthropic judge, `[llm]` extra + `ANTHROPIC_API_KEY`),
 is also available; it is non-deterministic and therefore not hash-replayable.
 
+## Grounded verify / RAG (Phase 5.3, `corpus`)
+
+Instead of hand-picking the exact evidence, you can pass a `corpus` (document
+pool) and let `chimera_verify` retrieve the top `retrieve_k` snippets per claim
+(deterministic token-overlap) and verify against those. Measured on the same 30
+claims, with the pool set to **all 30 evidence snippets** (so each claim's
+correct snippet is buried among 29 distractors):
+
+| Metric | lexical baseline | oracle nli | **nli + rag** |
+|---|---|---|---|
+| Accuracy | 0.633 | 0.933 | **0.800** |
+| Macro F1 | 0.525 | 0.935 | **0.805** |
+| Contradicted — recall | 0.000 | 1.000 | **1.000** |
+
+Honest reading: retrieval keeps most of the NLI lift (0.80 vs 0.93 oracle, well
+above the 0.633 lexical baseline) and preserves perfect contradiction recall,
+but costs ~13 points of accuracy — the retriever sometimes surfaces a
+*contradicting* neighbour for a claim whose true evidence is supportive or
+absent (3 supported→contradicted, 3 insufficient→contradicted). Reproduce with
+`python -m tools.halubench.run --method nli --rag`; numbers in
+`results_nli_rag.json`, guarded by `tests/test_halubench.py::TestHaluBenchRAG`.
+
 ## DetectBench (Phase 5.3, `chimera_detect` calibration)
 
 `chimera_detect` screens phrasing and attack patterns, not evidence entailment,
