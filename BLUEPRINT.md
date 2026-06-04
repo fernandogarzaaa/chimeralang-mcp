@@ -173,7 +173,7 @@ Independent audit (2026-05-07) identified the project's **real moat**: it's the 
 
 ---
 
-## Phase 5 — Verifiable hallucination detection **[IN PROGRESS]**
+## Phase 5 — Verifiable hallucination detection **[5.1–5.2 COMPLETE]**
 
 **Goal:** Give the hallucination pillar a *published number* (like Glyph's −16%) and a real semantic tier, so `chimera_verify` can catch contradictions that lexical overlap misses — without abandoning the deterministic default.
 
@@ -181,15 +181,15 @@ Independent audit (2026-05-07) identified the project's **real moat**: it's the 
 
 ### Sub-tasks
 - [x] **5.1 — Baseline benchmark (HaluBench).** `tools/halubench/` ships a 30-item hand-labeled corpus (10/10/10 across supported/contradicted/insufficient, 5 domains, no `verification_gold` leakage), a runner that scores every item through the live `chimera_verify` tool, and a regression test (`tests/test_halubench.py`) that locks the numbers. **Baseline (lexical): accuracy 0.633, macro-F1 0.525.** Headline finding: **contradiction recall = 0.000** — lexical overlap catches none of the 10 contradictions because claim and evidence share vocabulary. This is the number 5.2 must beat.
-- [ ] **5.2 — Optional semantic tier.** Add `method` param to `chimera_verify` (`lexical` default | `nli` | `llm`). `nli` = small deterministic cross-encoder (optional dep, lazy import); `llm` = Anthropic judge with prompt caching (optional dep). Verdicts stay method-namespaced (`lexically_*` / `nli_*` / `llm_*`). LLM tier is excluded from hash-locked replay/ChimeraBench (non-deterministic, carries `model_id`).
+- [x] **5.2 — Optional semantic tier.** `chimera_verify` gained a `method` param (`lexical` default | `nli` | `llm`). `nli` = `cross-encoder/nli-deberta-v3-xsmall` (optional `[semantic]` extra, lazy import, deterministic); `llm` = Anthropic judge with prompt caching (optional `[llm]` extra, `ANTHROPIC_API_KEY`, non-deterministic, not hash-replayable). Verdicts are method-namespaced (`lexically_*` / `nli_*` / `llm_*`); semantic results carry `model_id` + scores. Core server still imports with only `mcp` (heavy deps load on first semantic call). **Measured on HaluBench: nli lifts accuracy 0.633→0.933, macro-F1 0.525→0.935, and contradiction recall 0.000→1.000.** Regression-guarded by `tests/test_halubench.py::TestHaluBenchNLI` + `tests/test_verify_methods.py` (skip cleanly without the extra).
 - [ ] **5.3 — Calibrate `chimera_detect` (stretch).** Report detect's own precision/recall on the HaluBench corpus; optional grounded-RAG (retrieve→score) path.
 
 ### Success criteria
 - [x] Published lexical baseline F1, regression-locked
-- [ ] NLI tier beats lexical **contradiction recall** by a measured margin (target: catch the cases lexical labels "supported")
-- [ ] Server still imports & runs with **zero** new hard dependencies (semantic/llm optional + lazy)
-- [ ] Latency documented per tier
-- [ ] No claim on any surface without a number behind it
+- [x] NLI tier beats lexical **contradiction recall** by a measured margin (0.000 → 1.000 on HaluBench)
+- [x] Server still imports & runs with **zero** new hard dependencies (semantic/llm optional + lazy)
+- [x] Latency documented per tier (lexical sub-ms; nli ~100 ms/pair) — see `tools/halubench/README.md`
+- [x] No claim on any surface without a number behind it
 
 ### What this unlocks
 - The honest end-goal becomes provable: hallucination detection with a *number*, not a vibe.

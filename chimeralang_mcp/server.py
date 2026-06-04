@@ -43,6 +43,7 @@ from chimera.types import ConfidenceViolation
 from chimera.claude_adapter import ClaudeConstraintMiddleware, ToolCallSpec
 
 from chimeralang_mcp import __version__
+from chimeralang_mcp import semantic
 from chimeralang_mcp.replay import (
     REPLAYABLE_TOOLS as _REPLAYABLE_TOOLS,
     build_replay_program as _build_replay_program,
@@ -1603,12 +1604,34 @@ def _normalize_claim_input(claim: Any) -> dict[str, Any]:
     return {"text": str(claim)}
 
 
+def _verify_method_note(method: str) -> str:
+    if method == "nli":
+        return (
+            "Verdicts are from a local cross-encoder NLI model "
+            f"({semantic.NLI_MODEL_ID}): entailment->supported, "
+            "contradiction->contradicted, neutral->insufficient. Deterministic "
+            "given fixed weights; not a substitute for human review."
+        )
+    if method == "llm":
+        return (
+            f"Verdicts are from an LLM judge ({semantic.LLM_MODEL_ID}) reasoning "
+            "over the supplied evidence. Non-deterministic — not hash-replayable."
+        )
+    return (
+        "Verdicts are Jaccard token-overlap against evidence text — "
+        "NOT semantic entailment or NLI. lexically_supported means "
+        ">=55% token overlap, not logical implication."
+    )
+
+
 def _verify_claims_against_evidence(
     claims: list[Any],
     evidence: list[Any],
+    method: str = "lexical",
 ) -> dict[str, Any]:
     registry = _get_materials()
     claims = [_normalize_claim_input(claim) for claim in claims]
+    prefix = {"lexical": "lexically", "nli": "nli", "llm": "llm"}.get(method, "lexically")
     evidence_texts = [_evidence_text(item) for item in evidence]
     evidence_blob = "\n".join(evidence_texts).lower()
     evidence_lower = [text.lower() for text in evidence_texts]
@@ -1701,23 +1724,43 @@ def _verify_claims_against_evidence(
             "attack_flags": _dedupe_flags(claim_attack_flags),
             "pack_version": registry.pack_version,
         }
-        if contradiction_score >= 0.8:
-            evaluated["status"] = "lexically_contradicted"
-            evaluated["verdict"] = "lexically_contradicted"
-            evaluated["contradiction_score"] = round(contradiction_score, 4)
+
+        # Decide the verdict class (supported / contradicted / insufficient).
+        # Default lexical path uses the Jaccard thresholds. Semantic methods
+        # (nli/llm) classify the claim against evidence and override the class;
+        # lexical scores are still reported for transparency.
+        tainted = bool((best_match or {}).get("tainted"))
+        if method == "lexical":
+            if contradiction_score >= 0.8:
+                cls = "contradicted"
+            elif support_score >= 0.55 and not tainted:
+                cls = "supported"
+            else:
+                cls = "insufficient"
+        else:
+            sem = semantic.classify(claim_text, evidence_texts, method)
+            evaluated["semantic"] = sem
+            cls = sem["label"]
+            # Security guard: never let semantic scoring upgrade tainted
+            # (attack-flagged) evidence to "supported".
+            if cls == "supported" and tainted:
+                cls = "insufficient"
+
+        if cls == "contradicted":
+            evaluated["status"] = evaluated["verdict"] = f"{prefix}_contradicted"
+            if method == "lexical":
+                evaluated["contradiction_score"] = round(contradiction_score, 4)
             contradicted_claims.append(evaluated)
             if contradiction_match:
                 aggregate_matches.append(contradiction_match)
-        elif support_score >= 0.55 and not ((best_match or {}).get("tainted")):
-            evaluated["status"] = "lexically_supported"
-            evaluated["verdict"] = "lexically_supported"
+        elif cls == "supported":
+            evaluated["status"] = evaluated["verdict"] = f"{prefix}_supported"
             verified_claims.append(evaluated)
             if best_match:
                 aggregate_matches.append(best_match)
         else:
-            evaluated["status"] = "lexically_insufficient"
-            evaluated["verdict"] = "lexically_insufficient"
-            if best_match and best_match.get("tainted"):
+            evaluated["status"] = evaluated["verdict"] = f"{prefix}_insufficient"
+            if tainted:
                 evaluated["tainted_evidence"] = True
             unsupported_claims.append(evaluated)
             if best_match:
@@ -1727,11 +1770,11 @@ def _verify_claims_against_evidence(
     total = len(verified_claims) + len(unsupported_claims) + len(contradicted_claims)
     verification_score = round(len(verified_claims) / max(total, 1), 4)
     overall_verdict = (
-        "lexically_contradicted"
+        f"{prefix}_contradicted"
         if contradicted_claims
-        else "lexically_insufficient"
+        else f"{prefix}_insufficient"
         if unsupported_claims
-        else "lexically_supported"
+        else f"{prefix}_supported"
     )
     material_meta = _material_usage(
         ["verification_gold", "attack_patterns"],
@@ -1744,13 +1787,10 @@ def _verify_claims_against_evidence(
         "lexical_support_score": verification_score,
         "verification_score": verification_score,
         "evidence_count": len(evidence),
-        "supported": overall_verdict == "lexically_supported",
+        "supported": overall_verdict == f"{prefix}_supported",
         "verdict": overall_verdict,
-        "method_note": (
-            "Verdicts are Jaccard token-overlap against evidence text — "
-            "NOT semantic entailment or NLI. lexically_supported means "
-            ">=55% token overlap, not logical implication."
-        ),
+        "method": method,
+        "method_note": _verify_method_note(method),
         "evidence_matches": aggregate_matches,
         "attack_flags": _dedupe_flags(aggregate_attack_flags),
         "materials_used": material_meta["materials_used"],
@@ -2055,6 +2095,17 @@ async def list_tools() -> list[Tool]:
                     "text": {"type": "string", "description": "Optional raw text used to derive claims."},
                     "envelope": {"description": "Optional envelope containing value or claims to verify."},
                     "evidence": {"type": "array", "description": "Evidence snippets or objects with text/content fields."},
+                    "method": {
+                        "type": "string",
+                        "enum": ["lexical", "nli", "llm"],
+                        "default": "lexical",
+                        "description": (
+                            "Verification method. 'lexical' (default): Jaccard token-overlap, "
+                            "fast/deterministic, no extra deps. 'nli': local cross-encoder NLI "
+                            "model (needs [semantic] extra). 'llm': Anthropic judge (needs [llm] "
+                            "extra + ANTHROPIC_API_KEY, non-deterministic)."
+                        ),
+                    },
                     "namespace": {"type": "string", "default": "default"},
                 },
                 "required": ["evidence"],
@@ -3765,7 +3816,19 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 return _err("chimera_verify requires claims, text, or an envelope with claims")
 
             evidence = list(arguments.get("evidence") or [])
-            verification = _verify_claims_against_evidence(claims, evidence)
+            method = str(arguments.get("method") or "lexical")
+            if method not in {"lexical", "nli", "llm"}:
+                return _err(f"chimera_verify: unknown method {method!r} (use lexical|nli|llm)")
+            if method != "lexical" and not semantic.available(method):
+                extra = "semantic" if method == "nli" else "llm"
+                hint = (
+                    f"method='{method}' is unavailable. Install the extra: "
+                    f"pip install 'chimeralang-mcp[{extra}]'"
+                )
+                if method == "llm":
+                    hint += " and set ANTHROPIC_API_KEY"
+                return _err(hint)
+            verification = _verify_claims_against_evidence(claims, evidence, method=method)
             envelope = ResultEnvelope.coerce(
                 incoming if incoming is not None else {"claims": claims},
                 kind="verification_result",
@@ -3833,19 +3896,28 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             # Phase 2 (P2.S4): replay envelope. Inputs locked to the resolved
             # claims + original evidence (not the optional envelope/text inputs)
             # so a replay re-derives the same verification deterministically.
-            replay_args = {"claims": claims, "evidence": evidence}
-            replay_program = _build_replay_program("chimera_verify", replay_args)
+            # The default lexical path keeps byte-identical args (and hashes).
+            # The llm method is non-deterministic, so it is not replayable.
+            if method == "llm":
+                provenance = {"replayable": False, "tool": "chimera_verify",
+                              "reason": "llm method is non-deterministic"}
+            else:
+                replay_args = {"claims": claims, "evidence": evidence}
+                if method != "lexical":
+                    replay_args["method"] = method
+                replay_program = _build_replay_program("chimera_verify", replay_args)
+                provenance = {
+                    "program":      replay_program,
+                    "program_hash": _hash_program(replay_program),
+                    "replayable":   True,
+                    "tool":         "chimera_verify",
+                }
             return _ok({
                 "claims": claims,
                 **verification,
                 "namespace": namespace,
                 "envelope": envelope.to_dict(),
-                "provenance": {
-                    "program":      replay_program,
-                    "program_hash": _hash_program(replay_program),
-                    "replayable":   True,
-                    "tool":         "chimera_verify",
-                },
+                "provenance": provenance,
             })
 
         elif name == "chimera_provenance_merge":

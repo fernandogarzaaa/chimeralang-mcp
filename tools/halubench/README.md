@@ -65,3 +65,29 @@ Confusion (rows = gold, cols = predicted):
 
 The numbers above are locked by `tests/test_halubench.py`; any change to the
 scoring engine that moves them will fail the regression test loudly.
+
+## Semantic tier (Phase 5.2, `method="nli"`)
+
+The `nli` method routes each pair through a local cross-encoder NLI model
+(`cross-encoder/nli-deberta-v3-xsmall`, deterministic given fixed weights). It
+requires the optional `[semantic]` extra and is measured on the **same corpus**:
+
+| Metric | lexical (baseline) | **nli** |
+|---|---|---|
+| Accuracy | 0.633 | **0.933** |
+| Macro F1 | 0.525 | **0.935** |
+| Contradicted — recall | **0.000** | **1.000** |
+| Contradicted — F1 | 0.000 | 0.909 |
+| Supported — F1 | 0.667 | 0.947 |
+| Insufficient — F1 | 0.909 | 0.947 |
+
+The NLI tier catches **all 10 contradictions** the lexical method missed — the
+headline weakness, closed and measured. It is not free: it pulls in
+`sentence-transformers`/`torch` and is ~100 ms/pair vs sub-millisecond for
+lexical, so lexical remains the default. Full nli numbers are in
+`results_nli.json`; the lift is regression-guarded by
+`tests/test_halubench.py::TestHaluBenchNLI` (which skips where the extra isn't
+installed, e.g. CI).
+
+A third method, `llm` (Anthropic judge, `[llm]` extra + `ANTHROPIC_API_KEY`),
+is also available; it is non-deterministic and therefore not hash-replayable.

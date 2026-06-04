@@ -78,5 +78,29 @@ class TestHaluBench(unittest.TestCase):
         self.assertGreaterEqual(self.summary["per_class"]["insufficient"]["f1"], 0.85)
 
 
+from chimeralang_mcp import semantic  # noqa: E402
+
+
+@unittest.skipUnless(semantic.available("nli"),
+                     "nli method unavailable ([semantic] extra not installed)")
+class TestHaluBenchNLI(unittest.TestCase):
+    """Phase 5.2: the semantic tier must beat the lexical baseline's headline
+    weakness. Skips cleanly where the optional model isn't installed (e.g. CI)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.summary = asyncio.run(run("nli", verbose=False))
+
+    def test_nli_lifts_contradiction_recall_off_zero(self):
+        # Lexical baseline is 0.0; the whole point of 5.2 is to fix that.
+        recall = self.summary["per_class"]["contradicted"]["recall"]
+        self.assertGreaterEqual(recall, 0.8,
+                                f"nli contradiction recall {recall} should beat lexical 0.0")
+
+    def test_nli_macro_f1_beats_lexical(self):
+        # Lexical baseline macro-F1 is 0.525.
+        self.assertGreater(self.summary["macro_f1"], 0.80)
+
+
 if __name__ == "__main__":
     unittest.main()

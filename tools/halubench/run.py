@@ -139,8 +139,10 @@ def main() -> int:
 
     if args.update:
         snapshot = {k: summary[k] for k in ("method", "n", "accuracy", "macro_f1", "per_class")}
-        BASELINE.write_text(json.dumps(snapshot, indent=2) + "\n", encoding="utf-8")
-        print(f"\nWrote baseline -> {BASELINE.relative_to(REPO)}")
+        out = BASELINE if args.method == "lexical" else (
+            BASELINE.parent / f"results_{args.method}.json")
+        out.write_text(json.dumps(snapshot, indent=2) + "\n", encoding="utf-8")
+        print(f"\nWrote results -> {out.relative_to(REPO)}")
     return 0
 
 
