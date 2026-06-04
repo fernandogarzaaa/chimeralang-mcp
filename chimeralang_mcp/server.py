@@ -1717,6 +1717,25 @@ def _normalize_claim_input(claim: Any) -> dict[str, Any]:
     return {"text": str(claim)}
 
 
+def _coerce_messages(messages: Any) -> list[dict[str, Any]]:
+    """Coerce a messages argument into a list of dicts.
+
+    Tools that rank or compress conversation history expect each message to be
+    a dict with a "content" field. Plain strings (a natural shorthand) and other
+    scalars are wrapped so downstream code can rely on msg.get(...) instead of
+    raising AttributeError on a malformed item.
+    """
+    if not isinstance(messages, list):
+        return []
+    coerced: list[dict[str, Any]] = []
+    for msg in messages:
+        if isinstance(msg, dict):
+            coerced.append(msg)
+        else:
+            coerced.append({"role": "user", "content": "" if msg is None else str(msg)})
+    return coerced
+
+
 def _retrieve_evidence(
     claims: list[Any],
     corpus: list[Any],
@@ -4684,7 +4703,9 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         elif name == "chimera_compress":
             import re as _re
 
-            text          = arguments["text"]
+            text          = arguments.get("text")
+            if not isinstance(text, str) or not text.strip():
+                return _err("chimera_compress requires 'text': a non-empty string to compress")
             level         = arguments.get("level", "medium")
             preserve_code = bool(arguments.get("preserve_code", True))
             algorithm     = str(arguments.get("algorithm", "quantum")).lower()
@@ -4843,7 +4864,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
         # ── chimera_score ────────────────────────────────────────────────
         elif name == "chimera_score":
-            messages = arguments.get("messages", [])
+            messages = _coerce_messages(arguments.get("messages", []))
             focus    = _resolve_focus(arguments, messages=messages)
             mode     = arguments.get("mode", "drop_priority")
             if not messages:
