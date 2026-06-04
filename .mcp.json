@@ -3,6 +3,10 @@
     "chimeralang": {
       "command": "python",
       "args": ["-m", "chimeralang_mcp.server"]
+    },
+    "axiom": {
+      "command": "bash",
+      "args": ["scripts/axiom_mcp.sh"]
     }
   }
 }
