@@ -24,11 +24,19 @@ not survive a container reclaim. Provision it with:
 scripts/setup_axiom.sh        # clones + builds Axiom into ~/AXIOM-AETHER
 ```
 
-`setup_axiom.sh` is idempotent, needs Rust/cargo, and applies a small upstream
-build fix (the `axiom_engine` binary's `main.rs` is missing `mod model_meta;`,
-which `inference.rs` references — it builds the library but not the binary
-without it). For a durable setup, add `scripts/setup_axiom.sh` to the
-environment's **setup-script** configuration so it runs on container start.
+`setup_axiom.sh` is idempotent and needs Rust/cargo. For a durable setup, add it
+to the environment's **setup-script** configuration so it runs on container
+start.
+
+> **Upstream build bug (fix in AXIOM-AETHER, not here).** A fresh `cargo build`
+> of the `axiom_engine` binary fails with `E0433`: `axiom_engine_rs/src/inference.rs`
+> references `crate::model_meta`, but the binary's module root
+> `axiom_engine_rs/src/main.rs` is missing `mod model_meta;` (the library
+> `lib.rs` declares it, so the lib and the `src/bin/*` binaries compile, but the
+> main binary does not). The one-line fix belongs in the AXIOM-AETHER repo —
+> add `mod model_meta;` next to the other `mod` declarations in `main.rs`. This
+> repo intentionally does **not** patch upstream source; `setup_axiom.sh` will
+> stop with a pointer to this note if the build hits that error.
 
 The launcher (`scripts/axiom_mcp.sh`) finds the binary via `$AXIOM_BIN`,
 `$AXIOM_HOME` (default `~/AXIOM-AETHER`), or `/tmp/AXIOM-AETHER`, and runs from

@@ -27,16 +27,17 @@ if [[ ! -d "$AXIOM_HOME/.git" ]]; then
   git clone --depth 1 "$AXIOM_REPO" "$AXIOM_HOME"
 fi
 
-# Upstream build fix: the axiom_engine binary's module tree (main.rs) is missing
-# `mod model_meta;`, which inference.rs references via crate::model_meta. The
-# library declares it but the binary does not, so a fresh `cargo build` fails
-# with E0433. Inject it if absent (mirrors lib.rs). Remove once fixed upstream.
-MAIN="$AXIOM_HOME/axiom_engine_rs/src/main.rs"
-if [[ -f "$MAIN" ]] && ! grep -q '^mod model_meta;' "$MAIN"; then
-  sed -i 's/^mod model;$/mod model;\nmod model_meta;/' "$MAIN"
-  echo "[setup_axiom] applied model_meta module fix to main.rs"
-fi
-
+# NOTE: a fresh AXIOM-AETHER build of the `axiom_engine` binary currently fails
+# with E0433 because axiom_engine_rs/src/main.rs is missing `mod model_meta;`
+# (inference.rs references crate::model_meta; the library declares it, the binary
+# does not). That fix belongs UPSTREAM in AXIOM-AETHER, not here — see
+# docs/axiom-integration.md. This script does not patch upstream source; if the
+# build fails on that error, apply the upstream one-liner first.
 echo "[setup_axiom] building release binary (this can take several minutes)..."
-( cd "$AXIOM_HOME/axiom_engine_rs" && cargo build --release --bin axiom_engine )
+if ! ( cd "$AXIOM_HOME/axiom_engine_rs" && cargo build --release --bin axiom_engine ); then
+  echo "[setup_axiom] build failed. If the error is E0433 'crate::model_meta', the" >&2
+  echo "  AXIOM-AETHER repo needs 'mod model_meta;' added to axiom_engine_rs/src/main.rs" >&2
+  echo "  (see docs/axiom-integration.md)." >&2
+  exit 1
+fi
 echo "[setup_axiom] done: $BIN"
