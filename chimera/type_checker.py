@@ -70,6 +70,7 @@ class TypeEnv:
     parent: TypeEnv | None = None
 
     def lookup(self, name: str) -> ChimeraType | None:
+        """Lookup."""
         if name in self.bindings:
             return self.bindings[name]
         if self.parent is not None:
@@ -77,26 +78,32 @@ class TypeEnv:
         return None
 
     def define(self, name: str, ty: ChimeraType) -> None:
+        """Define."""
         self.bindings[name] = ty
 
     def child(self) -> TypeEnv:
+        """Child."""
         return TypeEnv(parent=self)
 
 
 @dataclass
 class TypeCheckResult:
+    """TypeCheckResult."""
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     ok: bool = True
 
 
 class TypeChecker:
+    """TypeChecker."""
     def __init__(self) -> None:
+        """Initialize the instance."""
         self._env = TypeEnv(bindings=dict(BUILTINS))
         self._result = TypeCheckResult()
         self._in_gate = False  # inside a gate → promotion allowed
 
     def check(self, program: Program) -> TypeCheckResult:
+        """Check."""
         for decl in program.declarations:
             self._check_decl(decl)
         self._result.ok = len(self._result.errors) == 0
@@ -107,6 +114,7 @@ class TypeChecker:
     # ------------------------------------------------------------------
 
     def _check_decl(self, node: Declaration | Statement) -> None:
+        """Check decl."""
         if isinstance(node, FnDecl):
             self._check_fn(node)
         elif isinstance(node, GateDecl):
@@ -121,6 +129,7 @@ class TypeChecker:
             self._check_stmt(node)
 
     def _check_fn(self, fn: FnDecl) -> None:
+        """Check fn."""
         scope = self._env.child()
         param_types = []
         for p in fn.params:
@@ -138,6 +147,7 @@ class TypeChecker:
         self._env = old_env
 
     def _check_gate(self, gate: GateDecl) -> None:
+        """Check gate."""
         old_in_gate = self._in_gate
         self._in_gate = True
         scope = self._env.child()
@@ -152,6 +162,7 @@ class TypeChecker:
         self._in_gate = old_in_gate
 
     def _check_goal(self, goal: GoalDecl) -> None:
+        """Check goal."""
         scope = self._env.child()
         old_env = self._env
         self._env = scope
@@ -160,6 +171,7 @@ class TypeChecker:
         self._env = old_env
 
     def _check_reason(self, reason: ReasonDecl) -> None:
+        """Check reason."""
         scope = self._env.child()
         for p in reason.params:
             pt = self._resolve_type(p.type_ann)
@@ -171,6 +183,7 @@ class TypeChecker:
         self._env = old_env
 
     def _check_val(self, val: ValDecl) -> None:
+        """Check val."""
         declared = self._resolve_type(val.type_ann) if val.type_ann else None
         if val.value is not None:
             inferred = self._infer_expr(val.value)
@@ -186,6 +199,7 @@ class TypeChecker:
     # ------------------------------------------------------------------
 
     def _check_stmt(self, stmt: Statement) -> None:
+        """Check stmt."""
         if isinstance(stmt, ValDecl):
             self._check_val(stmt)
         elif isinstance(stmt, ReturnStmt):
@@ -201,6 +215,7 @@ class TypeChecker:
             self._infer_expr(stmt.expr)
 
     def _check_for(self, stmt: ForStmt) -> None:
+        """Check for."""
         self._infer_expr(stmt.iterable)
         scope = self._env.child()
         scope.define(stmt.target, VOID_T)
@@ -215,6 +230,7 @@ class TypeChecker:
     # ------------------------------------------------------------------
 
     def _infer_expr(self, expr: Expr) -> ChimeraType:
+        """Infer expr."""
         if isinstance(expr, IntLiteral):
             return INT_T
         if isinstance(expr, FloatLiteral):
@@ -261,6 +277,7 @@ class TypeChecker:
         return VOID_T
 
     def _infer_binary(self, expr: BinaryOp) -> ChimeraType:
+        """Infer binary."""
         lt = self._infer_expr(expr.left)
         rt = self._infer_expr(expr.right)
         if expr.op in ("==", "!=", "<", ">", "<=", ">=", "and", "or"):
@@ -272,6 +289,7 @@ class TypeChecker:
         return lt
 
     def _infer_call(self, expr: CallExpr) -> ChimeraType:
+        """Infer call."""
         if isinstance(expr.callee, Identifier):
             fn_type = self._env.lookup(expr.callee.name)
             if isinstance(fn_type, FnTypeDesc):
@@ -292,6 +310,7 @@ class TypeChecker:
     # ------------------------------------------------------------------
 
     def _check_assignment_compat(self, declared: ChimeraType, inferred: ChimeraType, name: str) -> None:
+        """Check assignment compat."""
         if isinstance(declared, ProbTypeDesc) and declared.wrapper == "Confident":
             if isinstance(inferred, ProbTypeDesc) and inferred.wrapper == "Explore":
                 if not self._in_gate:
@@ -305,6 +324,7 @@ class TypeChecker:
     # ------------------------------------------------------------------
 
     def _resolve_type(self, t: TypeExpr | None) -> ChimeraType:
+        """Resolve type."""
         if t is None:
             return VOID_T
         if isinstance(t, PrimitiveType):

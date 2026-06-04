@@ -42,6 +42,7 @@ def _normalize_verdict(verdict: str) -> str:
 
 
 async def _predict(item: dict, method: str, rag_pool: list[str] | None = None) -> str:
+    """Return the predicted verdict for one corpus item via chimera_verify."""
     args: dict[str, Any] = {"claims": [item["claim"]]}
     if rag_pool is not None:
         # Grounded verify: no hand-picked evidence — the right snippet is buried
@@ -92,6 +93,7 @@ def _metrics(rows: list[tuple[str, str]]) -> dict[str, Any]:
 
 
 def _confusion(rows: list[tuple[str, str]]) -> dict[str, dict[str, int]]:
+    """Build the gold-vs-predicted confusion matrix."""
     matrix = {g: {p: 0 for p in LABELS} for g in LABELS}
     for gold, pred in rows:
         if gold in matrix and pred in matrix[gold]:
@@ -100,6 +102,7 @@ def _confusion(rows: list[tuple[str, str]]) -> dict[str, dict[str, int]]:
 
 
 async def run(method: str, verbose: bool, rag: bool = False) -> dict[str, Any]:
+    """Score the whole corpus and return aggregate metrics."""
     corpus = json.loads(CORPUS.read_text(encoding="utf-8"))
     items = corpus["items"]
     # In RAG mode, the evidence pool is every item's evidence — so each claim's
@@ -123,6 +126,7 @@ async def run(method: str, verbose: bool, rag: bool = False) -> dict[str, Any]:
 
 
 def _print_report(summary: dict[str, Any]) -> None:
+    """Print a formatted metrics report to stdout."""
     print("\n" + "=" * 60)
     print(f"HaluBench — method={summary['method']}  n={summary['n']}")
     print("=" * 60)
@@ -144,6 +148,7 @@ def _print_report(summary: dict[str, Any]) -> None:
 
 
 def main() -> int:
+    """CLI entry point for the HaluBench harness."""
     parser = argparse.ArgumentParser(prog="halubench")
     parser.add_argument("--method", default="lexical",
                         help="verify scoring method (lexical|nli|llm); default lexical")

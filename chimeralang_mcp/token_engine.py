@@ -88,10 +88,12 @@ _STRUCTURE_HINTS = (
 
 
 def _estimate_tokens(text: str) -> int:
+    """Estimate tokens."""
     return max(0, len(text) // 4)
 
 
 def _normalize_content(content: Any) -> str:
+    """Normalize content."""
     if isinstance(content, list):
         text_parts = []
         for part in content:
@@ -105,24 +107,28 @@ def _normalize_content(content: Any) -> str:
 
 
 def _normalize_whitespace(text: str) -> str:
+    """Normalize whitespace."""
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
 def _strip_filler(text: str) -> str:
+    """Strip filler."""
     for pattern in _FILLER_PATTERNS:
         text = re.sub(pattern, "", text, flags=re.IGNORECASE)
     return _normalize_whitespace(re.sub(r"[ \t]{2,}", " ", text))
 
 
 def _apply_contractions(text: str) -> str:
+    """Apply contractions."""
     for pattern, replacement in _CONTRACTIONS_MEDIUM.items():
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
     return text
 
 
 def _apply_symbols(text: str) -> str:
+    """Apply symbols."""
     for pattern, replacement in _SYMBOLS_AGGRESSIVE.items():
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
     text = re.sub(r"\.{2,}", "…", text)
@@ -131,6 +137,7 @@ def _apply_symbols(text: str) -> str:
 
 
 def _dedup_lines(text: str) -> str:
+    """Dedup lines."""
     seen: set[str] = set()
     lines_out: list[str] = []
     for line in text.splitlines():
@@ -146,6 +153,7 @@ def _dedup_lines(text: str) -> str:
 
 
 def _collapse_lists(text: str) -> str:
+    """Collapse lists."""
     list_item_pattern = r"(?:^|\n)([-*•])\s+(.+?)(?=\n[-*•]|\n\n|$)"
     items_ordered: list[tuple[str, str]] = []
     seen_items: set[str] = set()
@@ -161,9 +169,11 @@ def _collapse_lists(text: str) -> str:
 
 
 def _stash_code_blocks(text: str) -> tuple[str, list[str]]:
+    """Stash code blocks."""
     code_blocks: list[str] = []
 
     def _stash(match: re.Match[str]) -> str:
+        """Stash."""
         code_blocks.append(match.group(0))
         return f"\x00CODE{len(code_blocks) - 1}\x00"
 
@@ -171,12 +181,14 @@ def _stash_code_blocks(text: str) -> tuple[str, list[str]]:
 
 
 def _restore_code_blocks(text: str, code_blocks: list[str]) -> str:
+    """Restore code blocks."""
     for index, block in enumerate(code_blocks):
         text = text.replace(f"\x00CODE{index}\x00", block)
     return text
 
 
 def _tokenize_terms(text: str) -> list[str]:
+    """Tokenize terms."""
     tokens = []
     for token in re.findall(r"[A-Za-z0-9_./:-]+", text.lower()):
         if len(token) < 3 and not token.isdigit():
@@ -194,6 +206,7 @@ def _tokenize_terms(text: str) -> list[str]:
 
 
 def _extract_focus_terms(text: str, limit: int = 12) -> list[str]:
+    """Extract focus terms."""
     counts = Counter(_tokenize_terms(text))
     if not counts:
         return []
@@ -202,15 +215,18 @@ def _extract_focus_terms(text: str, limit: int = 12) -> list[str]:
 
 
 def normalize_content(content: Any) -> str:
+    """Normalize content."""
     return _normalize_content(content)
 
 
 def extract_focus_terms(text: str, limit: int = 12) -> list[str]:
+    """Extract focus terms."""
     return _extract_focus_terms(text, limit=limit)
 
 
 @dataclass
 class CompressionUnit:
+    """CompressionUnit."""
     index: int
     text: str
     terms: set[str]
@@ -224,6 +240,7 @@ class CompressionUnit:
 
 @dataclass
 class QuantumCompressionResult:
+    """QuantumCompressionResult."""
     text: str
     algorithm: str
     original_chars: int
@@ -239,6 +256,7 @@ class QuantumCompressionResult:
 
 @dataclass
 class QuantumMessageCompressionResult:
+    """QuantumMessageCompressionResult."""
     messages: list[dict[str, Any]]
     compressed_history: str
     original_tokens: int
@@ -278,6 +296,7 @@ class QuantumCompressionEngine:
         target_ratio: float | None = None,
         max_tokens: int | None = None,
     ) -> QuantumCompressionResult:
+        """Optimize text."""
         original_text = str(text or "")
         original_tokens = _estimate_tokens(original_text)
         code_blocks: list[str] = []
@@ -364,6 +383,7 @@ class QuantumCompressionEngine:
         token_budget: int | None = None,
         allow_lossy: bool = False,
     ) -> QuantumMessageCompressionResult:
+        """Compress messages."""
         normalized_messages = [
             {
                 "role": message.get("role", "user"),
@@ -452,6 +472,7 @@ class QuantumCompressionEngine:
         *,
         focus: str = "",
     ) -> float:
+        """Score message."""
         content = _normalize_content(message.get("content", ""))
         recency_score = self._recency(index, total)
         type_score = self._content_type_score(message)
@@ -472,6 +493,7 @@ class QuantumCompressionEngine:
         return round(min(1.0, score), 4)
 
     def render_history(self, messages: list[dict[str, Any]]) -> str:
+        """Render history."""
         if not messages:
             return ""
         return "\n".join(
@@ -488,6 +510,7 @@ class QuantumCompressionEngine:
         max_tokens: int | None,
         focus_terms: list[str],
     ) -> int:
+        """Target budget."""
         if max_tokens is not None:
             return max(8, max_tokens)
         ratio = self._LEVEL_TARGETS.get(level, self._LEVEL_TARGETS["medium"])
@@ -498,6 +521,7 @@ class QuantumCompressionEngine:
         return max(8, math.ceil(total_tokens * ratio))
 
     def _message_target_ratio(self, *, role: str, score: float, pressure: float, content: str) -> float:
+        """Message target ratio."""
         floor = self._ROLE_FLOORS.get(role, 0.2)
         if "```" in content:
             floor = max(floor, 0.55)
@@ -505,6 +529,7 @@ class QuantumCompressionEngine:
         return max(floor, min(0.92, target))
 
     def _micro_compress(self, text: str, level: str) -> str:
+        """Micro compress."""
         work = _normalize_whitespace(text)
         work = _strip_filler(work)
         if level in ("medium", "aggressive"):
@@ -514,6 +539,7 @@ class QuantumCompressionEngine:
         return _normalize_whitespace(work)
 
     def _split_units(self, text: str) -> list[CompressionUnit]:
+        """Split units."""
         raw_units: list[str] = []
         for block in re.split(r"\n{2,}", text):
             block = block.strip()
@@ -544,6 +570,7 @@ class QuantumCompressionEngine:
         return units
 
     def _split_sentence_like(self, line: str) -> list[str]:
+        """Split sentence like."""
         if _CODE_PLACEHOLDER_RE.fullmatch(line.strip()):
             return [line.strip()]
         if re.match(r"^[-*•]\s+", line.strip()):
@@ -559,6 +586,7 @@ class QuantumCompressionEngine:
         focus_terms: list[str],
         budget_tokens: int,
     ) -> list[CompressionUnit]:
+        """Measure units."""
         if not units:
             return []
         focus_set = set(focus_terms)
@@ -629,11 +657,13 @@ class QuantumCompressionEngine:
         return selected_units
 
     def _render_units(self, units: list[CompressionUnit]) -> str:
+        """Render units."""
         if not units:
             return ""
         return "\n".join(unit.text for unit in units if unit.text).strip()
 
     def _summarize_dropped(self, texts: list[str], *, focus_terms: list[str], dropped_count: int) -> str:
+        """Summarize dropped."""
         if not texts:
             return ""
         counts = Counter()
@@ -655,6 +685,7 @@ class QuantumCompressionEngine:
         )
 
     def _focus_overlap(self, terms: set[str], focus_terms: set[str]) -> float:
+        """Focus overlap."""
         if not focus_terms:
             return 0.55 if terms else 0.0
         if not terms:
@@ -663,6 +694,7 @@ class QuantumCompressionEngine:
         return min(1.0, overlap / max(1, min(len(focus_terms), 4)))
 
     def _rarity_score(self, terms: set[str], global_freq: Counter[str]) -> float:
+        """Rarity score."""
         if not terms:
             return 0.0
         rarity = sum(1.0 / max(1, global_freq[term]) for term in terms) / len(terms)
@@ -674,6 +706,7 @@ class QuantumCompressionEngine:
         global_freq: Counter[str],
         focus_terms: set[str],
     ) -> float:
+        """Entanglement score."""
         if not terms:
             return 0.0
         shared_terms = [term for term in terms if global_freq[term] > 1]
@@ -681,6 +714,7 @@ class QuantumCompressionEngine:
         return min(1.0, (len(shared_terms) * 0.18) + (focus_links * 0.22))
 
     def _position_score(self, index: int, total: int) -> float:
+        """Position score."""
         if total <= 1:
             return 1.0
         edge_distance = min(index, total - 1 - index)
@@ -688,6 +722,7 @@ class QuantumCompressionEngine:
         return max(0.25, normalized)
 
     def _structural_signal(self, text: str, locked: bool) -> float:
+        """Structural signal."""
         if locked:
             return 1.0
         score = 0.0
@@ -708,6 +743,7 @@ class QuantumCompressionEngine:
         return min(1.0, score + 0.15)
 
     def _jaccard(self, left: set[str], right: set[str]) -> float:
+        """Jaccard."""
         if not left or not right:
             return 0.0
         union = left | right
@@ -716,11 +752,13 @@ class QuantumCompressionEngine:
         return len(left & right) / len(union)
 
     def _recency(self, index: int, total: int) -> float:
+        """Recency."""
         if total <= 1:
             return 1.0
         return index / (total - 1)
 
     def _content_type_score(self, message: dict[str, Any]) -> float:
+        """Content type score."""
         content = _normalize_content(message.get("content", ""))
         role = message.get("role", "")
         if "```" in content or content.startswith("```"):
@@ -740,6 +778,7 @@ class QuantumCompressionEngine:
         return 0.40
 
     def _info_density(self, content: str) -> float:
+        """Info density."""
         words = content.lower().split()
         if not words:
             return 0.0
@@ -752,6 +791,7 @@ class QuantumCompressionEngine:
         return min(density, 1.0)
 
     def _replaceability(self, message: dict[str, Any]) -> float:
+        """Replaceability."""
         role = message.get("role", "")
         content = _normalize_content(message.get("content", ""))
         if role == "user":
@@ -778,6 +818,7 @@ class TokenBudgetManager:
     _instance: TokenBudgetManager | None = None
 
     def __new__(cls) -> TokenBudgetManager:
+        """New."""
         # Singleton
         if cls._instance is None:
             obj = object.__new__(cls)
@@ -786,6 +827,7 @@ class TokenBudgetManager:
         return cls._instance
 
     def __init__(self) -> None:
+        """Initialize the instance."""
         if self._initialized:
             return
         self._initialized = True
@@ -889,9 +931,11 @@ class TokenBudgetManager:
 
     @staticmethod
     def _hash(text: str) -> str:
+        """Hash."""
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     def _cache_get(self, key: str) -> int | None:
+        """Cache get."""
         value = self._cache.get(key)
         if value is None:
             return None
@@ -899,12 +943,14 @@ class TokenBudgetManager:
         return value
 
     def _cache_put(self, key: str, value: int) -> None:
+        """Cache put."""
         self._cache[key] = value
         self._cache.move_to_end(key)
         while len(self._cache) > self._cache_max_entries:
             self._cache.popitem(last=False)
 
     def _record_fallback(self, reason: str, exc: Exception | None = None) -> None:
+        """Record fallback."""
         self._token_count_method = "estimate"
         self._fallback_count += 1
         self._last_fallback_reason = reason
@@ -920,6 +966,7 @@ class TokenBudgetManager:
 
     @staticmethod
     def _estimate_message_tokens(message: dict[str, Any]) -> int:
+        """Estimate message tokens."""
         content = message.get("content", "")
         if isinstance(content, list):
             text_parts = [str(p.get("text", "")) for p in content if isinstance(p, dict) and p.get("type") == "text"]
@@ -928,6 +975,7 @@ class TokenBudgetManager:
 
     @staticmethod
     def _read_cache_size() -> int:
+        """Read cache size."""
         raw = os.environ.get("CHIMERA_TOKEN_CACHE_MAX_ENTRIES", "").strip()
         if not raw:
             return 2048
@@ -940,6 +988,7 @@ class TokenBudgetManager:
 
     @staticmethod
     def _read_fallback_log_interval() -> float:
+        """Read fallback log interval."""
         raw = os.environ.get("CHIMERA_TOKEN_FALLBACK_LOG_INTERVAL_S", "").strip()
         if not raw:
             return 60.0
@@ -960,6 +1009,7 @@ class MessageImportanceScorer:
     """Score each message by importance for lossy compression decisions."""
 
     def __init__(self) -> None:
+        """Initialize the instance."""
         self._quantum = QuantumCompressionEngine()
 
     def score(
@@ -1002,6 +1052,7 @@ class MessageImportanceScorer:
         *,
         focus: str = "",
     ) -> str:
+        """Dominant reason."""
         content = _normalize_content(message.get("content", ""))
         focus_terms = set(_extract_focus_terms(focus))
         content_terms = set(_tokenize_terms(content))

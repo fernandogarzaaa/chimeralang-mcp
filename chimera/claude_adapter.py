@@ -104,6 +104,7 @@ class ConstrainedResult:
     duration_ms: float = 0.0
 
     def __repr__(self) -> str:
+        """Return the developer string representation."""
         status = "PASS" if self.passed else "FAIL"
         return (
             f"ConstrainedResult({self.tool_name}, {status}, "
@@ -134,6 +135,7 @@ class ClaudeConstraintMiddleware:
         confidence_threshold: float = 0.7,
         strict: bool = False,
     ) -> None:
+        """Initialize the instance."""
         self._threshold = confidence_threshold
         self._strict = strict
         self._detector = HallucinationDetector()

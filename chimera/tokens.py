@@ -7,6 +7,7 @@ from enum import Enum, auto
 
 
 class TokenKind(Enum):
+    """TokenKind."""
     # Literals
     INT_LIT = auto()
     FLOAT_LIT = auto()
@@ -126,11 +127,13 @@ class SourceSpan:
 
 @dataclass(frozen=True, slots=True)
 class Token:
+    """Token."""
     kind: TokenKind
     value: str
     span: SourceSpan
 
     def __repr__(self) -> str:
+        """Return the developer string representation."""
         return f"Token({self.kind.name}, {self.value!r}, L{self.span.line}:{self.span.col})"
 
 

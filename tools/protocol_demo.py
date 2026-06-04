@@ -51,6 +51,7 @@ SCENARIO = {
 
 
 def banner(text: str) -> None:
+    """Banner."""
     print()
     print("=" * 72)
     print(text)
@@ -61,6 +62,7 @@ def banner(text: str) -> None:
 
 
 async def main() -> int:
+    """Main."""
     banner("AGENT A — orchestrator")
     print(f"  scenario: {SCENARIO['tool']}({len(SCENARIO['args']['candidates'])} candidates)")
     print(f"  strategy: {SCENARIO['args']['strategy']}, threshold: {SCENARIO['args']['threshold']}")

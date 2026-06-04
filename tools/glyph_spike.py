@@ -30,6 +30,7 @@ ENC = tiktoken.get_encoding("o200k_base")
 
 
 def n_tokens(s: str) -> int:
+    """N tokens."""
     return len(ENC.encode(s))
 
 
@@ -180,6 +181,7 @@ def headroom_report(stem_report: dict) -> dict:
 
 
 def main() -> None:
+    """Main."""
     stems = per_stem_report()
     corpus = corpus_report()
     headroom = headroom_report(stems)

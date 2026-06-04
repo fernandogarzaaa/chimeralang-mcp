@@ -1,3 +1,4 @@
+"""Loader."""
 from __future__ import annotations
 
 import os
@@ -15,7 +16,9 @@ from .builders import (
 
 
 class MaterialRegistry:
+    """MaterialRegistry."""
     def __init__(self, base_dir: str | None = None) -> None:
+        """Initialize the instance."""
         root = base_dir or os.environ.get("CHIMERA_MCP_DATA_DIR")
         self.base_dir = Path(root) if root else Path.home() / ".chimeralang_mcp"
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -25,17 +28,21 @@ class MaterialRegistry:
 
     @property
     def pack_version(self) -> str:
+        """Pack version."""
         return str(self._core_pack["pack_version"])
 
     @property
     def manifest(self) -> dict[str, Any]:
+        """Manifest."""
         return self._manifest
 
     @property
     def core_pack(self) -> dict[str, Any]:
+        """Core pack."""
         return self._core_pack
 
     def list_packs(self) -> list[dict[str, Any]]:
+        """List packs."""
         items: list[dict[str, Any]] = []
         for pack_type, records in self._core_pack["packs"].items():
             source_ids = sorted({sid for record in records for sid in record.get("source_ids", [])})
@@ -53,24 +60,30 @@ class MaterialRegistry:
         return items
 
     def status(self) -> dict[str, Any]:
+        """Status."""
         return build_status_report(self.base_dir, self._manifest, self._core_pack)
 
     def licenses(self) -> dict[str, Any]:
+        """Licenses."""
         return self._license_report
 
     def source_manifest(self) -> dict[str, Any]:
+        """Source manifest."""
         return self._manifest
 
     def pack(self, pack_type: str) -> list[dict[str, Any]]:
+        """Pack."""
         return list(self._core_pack["packs"].get(pack_type, []))
 
     def policy_pattern(self, policy_name: str) -> dict[str, Any] | None:
+        """Policy pattern."""
         for item in self.pack("policy_patterns"):
             if item.get("name") == policy_name:
                 return item
         return None
 
     def classify_claim(self, text: str) -> dict[str, Any]:
+        """Classify claim."""
         lowered = text.lower().strip()
         risk_tags: list[str] = []
         hedged = any(marker in lowered for marker in self._core_pack["lexicons"]["hedge_markers"])
@@ -123,6 +136,7 @@ class MaterialRegistry:
         }
 
     def atomic_claim_parts(self, text: str) -> list[str]:
+        """Atomic claim parts."""
         cleaned = re.sub(r"\s+", " ", text.strip())
         parts = [
             part.strip(" ,;")
@@ -132,6 +146,7 @@ class MaterialRegistry:
         return parts or [cleaned]
 
     def find_attack_matches(self, text: str) -> list[dict[str, Any]]:
+        """Find attack matches."""
         lowered = text.lower()
         matches: list[dict[str, Any]] = []
         for record in self.pack("attack_patterns"):
@@ -152,6 +167,7 @@ class MaterialRegistry:
         return matches
 
     def security_category_counts(self, flags: list[dict[str, Any]]) -> dict[str, int]:
+        """Security category counts."""
         counts = Counter(str(flag.get("category", "unknown")) for flag in flags)
         return dict(counts)
 
@@ -161,6 +177,7 @@ class MaterialRegistry:
         *,
         source_ids: list[str] | None = None,
     ) -> dict[str, Any]:
+        """Material usage."""
         resolved_sources = set(source_ids or [])
         materials_used: list[dict[str, Any]] = []
         pack_versions: dict[str, str] = {}
@@ -187,6 +204,7 @@ _REGISTRY_CACHE: dict[str, MaterialRegistry] = {}
 
 
 def get_material_registry(base_dir: str | None = None, refresh: bool = False) -> MaterialRegistry:
+    """Get material registry."""
     root = base_dir or os.environ.get("CHIMERA_MCP_DATA_DIR") or str(Path.home() / ".chimeralang_mcp")
     if refresh or root not in _REGISTRY_CACHE:
         _REGISTRY_CACHE[root] = MaterialRegistry(root)

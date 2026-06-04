@@ -1,3 +1,4 @@
+"""Materials package."""
 from __future__ import annotations
 
 from .builders import (

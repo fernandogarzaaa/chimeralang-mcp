@@ -9,14 +9,18 @@ from chimera.tokens import KEYWORDS, SourceSpan, Token, TokenKind
 
 
 class LexError(Exception):
+    """LexError."""
     def __init__(self, message: str, line: int, col: int) -> None:
+        """Initialize the instance."""
         self.line = line
         self.col = col
         super().__init__(f"LexError at L{line}:{col}: {message}")
 
 
 class Lexer:
+    """Lexer."""
     def __init__(self, source: str, filename: str = "<stdin>") -> None:
+        """Initialize the instance."""
         self._src = source
         self._file = filename
         self._pos = 0
@@ -29,6 +33,7 @@ class Lexer:
     # ------------------------------------------------------------------
 
     def tokenize(self) -> list[Token]:
+        """Tokenize."""
         while not self._at_end():
             self._skip_whitespace_and_comments()
             if self._at_end():
@@ -61,19 +66,23 @@ class Lexer:
     # ------------------------------------------------------------------
 
     def _at_end(self) -> bool:
+        """At end."""
         return self._pos >= len(self._src)
 
     def _peek(self, offset: int = 0) -> str:
+        """Peek."""
         idx = self._pos + offset
         return self._src[idx] if idx < len(self._src) else "\0"
 
     def _advance(self) -> str:
+        """Advance."""
         ch = self._src[self._pos]
         self._pos += 1
         self._col += 1
         return ch
 
     def _span(self, length: int) -> SourceSpan:
+        """Span."""
         return SourceSpan(
             line=self._line,
             col=self._col - length,
@@ -83,9 +92,11 @@ class Lexer:
         )
 
     def _emit(self, kind: TokenKind, value: str, length: int) -> None:
+        """Emit."""
         self._tokens.append(Token(kind, value, self._span(length)))
 
     def _emit_single(self, kind: TokenKind, value: str) -> None:
+        """Emit single."""
         self._tokens.append(
             Token(kind, value, SourceSpan(self._line, self._col, self._pos, len(value), self._file))
         )
@@ -95,6 +106,7 @@ class Lexer:
     # ------------------------------------------------------------------
 
     def _skip_whitespace_and_comments(self) -> None:
+        """Skip whitespace and comments."""
         while not self._at_end():
             ch = self._peek()
             if ch in (" ", "\t", "\r"):
@@ -124,6 +136,7 @@ class Lexer:
     # ------------------------------------------------------------------
 
     def _read_string(self) -> None:
+        """Read string."""
         self._advance()  # opening "
         start = self._pos
         while not self._at_end() and self._peek() != '"':
@@ -140,6 +153,7 @@ class Lexer:
         self._emit(TokenKind.STRING_LIT, value, len(value) + 2)
 
     def _read_number(self) -> None:
+        """Read number."""
         start = self._pos
         is_float = False
         while not self._at_end() and (self._peek().isdigit() or self._peek() == "."):
@@ -153,6 +167,7 @@ class Lexer:
         self._emit(kind, text, len(text))
 
     def _read_ident_or_keyword(self) -> None:
+        """Read ident or keyword."""
         start = self._pos
         while not self._at_end() and (self._peek().isalnum() or self._peek() == "_"):
             self._advance()
@@ -165,6 +180,7 @@ class Lexer:
         self._emit(kind, text, len(text))
 
     def _read_symbol(self) -> None:
+        """Read symbol."""
         ch = self._advance()
         two = ch + self._peek() if not self._at_end() else ch
 

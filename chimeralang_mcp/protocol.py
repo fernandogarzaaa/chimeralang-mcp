@@ -57,10 +57,12 @@ class Handoff:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> str:
+        """To json."""
         return json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
 
     @classmethod
     def from_json(cls, data: str) -> "Handoff":
+        """From json."""
         return cls(**json.loads(data))
 
 
@@ -115,6 +117,7 @@ def pack(
 
 @dataclass
 class VerificationResult:
+    """VerificationResult."""
     accepted: bool
     failure_reason: str | None
     tool: str | None

@@ -50,14 +50,18 @@ from chimera.tokens import Token, TokenKind
 
 
 class ParseError(Exception):
+    """ParseError."""
     def __init__(self, message: str, token: Token) -> None:
+        """Initialize the instance."""
         self.token = token
         loc = f"L{token.span.line}:{token.span.col}"
         super().__init__(f"ParseError at {loc}: {message} (got {token.kind.name} {token.value!r})")
 
 
 class Parser:
+    """Parser."""
     def __init__(self, tokens: list[Token]) -> None:
+        """Initialize the instance."""
         self._tokens = tokens
         self._pos = 0
 
@@ -66,6 +70,7 @@ class Parser:
     # ------------------------------------------------------------------
 
     def parse(self) -> Program:
+        """Parse."""
         decls: list[Declaration | Statement] = []
         self._skip_newlines()
         while not self._check(TokenKind.EOF):
@@ -78,37 +83,45 @@ class Parser:
     # ------------------------------------------------------------------
 
     def _current(self) -> Token:
+        """Current."""
         return self._tokens[self._pos]
 
     def _peek_kind(self, offset: int = 0) -> TokenKind:
+        """Peek kind."""
         idx = self._pos + offset
         if idx < len(self._tokens):
             return self._tokens[idx].kind
         return TokenKind.EOF
 
     def _check(self, kind: TokenKind) -> bool:
+        """Check."""
         return self._current().kind == kind
 
     def _match(self, *kinds: TokenKind) -> Token | None:
+        """Match."""
         if self._current().kind in kinds:
             return self._advance()
         return None
 
     def _expect(self, kind: TokenKind, msg: str = "") -> Token:
+        """Expect."""
         if self._current().kind == kind:
             return self._advance()
         raise ParseError(msg or f"Expected {kind.name}", self._current())
 
     def _advance(self) -> Token:
+        """Advance."""
         tok = self._tokens[self._pos]
         self._pos += 1
         return tok
 
     def _skip_newlines(self) -> None:
+        """Skip newlines."""
         while self._check(TokenKind.NEWLINE):
             self._advance()
 
     def _expect_line_end(self) -> None:
+        """Expect line end."""
         if not self._check(TokenKind.NEWLINE) and not self._check(TokenKind.EOF):
             pass  # lenient — don't error on missing newline
         self._skip_newlines()
@@ -118,6 +131,7 @@ class Parser:
     # ------------------------------------------------------------------
 
     def _parse_top_level(self) -> Declaration | Statement:
+        """Parse top level."""
         kind = self._current().kind
         if kind == TokenKind.FN:
             return self._parse_fn()
@@ -136,6 +150,7 @@ class Parser:
     # ------------------------------------------------------------------
 
     def _parse_fn(self) -> FnDecl:
+        """Parse fn."""
         span = self._expect(TokenKind.FN).span
         name = self._expect(TokenKind.IDENT, "Expected function name").value
         self._expect(TokenKind.LPAREN, "Expected '(' after function name")
@@ -171,6 +186,7 @@ class Parser:
     # ------------------------------------------------------------------
 
     def _parse_gate(self) -> GateDecl:
+        """Parse gate."""
         span = self._expect(TokenKind.GATE).span
         name = self._expect(TokenKind.IDENT, "Expected gate name").value
         self._expect(TokenKind.LPAREN, "Expected '(' after gate name")
@@ -230,6 +246,7 @@ class Parser:
     # ------------------------------------------------------------------
 
     def _parse_goal(self) -> GoalDecl:
+        """Parse goal."""
         span = self._expect(TokenKind.GOAL).span
         desc = self._expect(TokenKind.STRING_LIT, "Expected goal description string").value
         self._expect_line_end()
@@ -272,6 +289,7 @@ class Parser:
     # ------------------------------------------------------------------
 
     def _parse_reason(self) -> ReasonDecl:
+        """Parse reason."""
         span = self._expect(TokenKind.REASON).span
         self._expect(TokenKind.ABOUT, "Expected 'about' after 'reason'")
         self._expect(TokenKind.LPAREN)
@@ -316,6 +334,7 @@ class Parser:
     # ------------------------------------------------------------------
 
     def _parse_val(self) -> ValDecl:
+        """Parse val."""
         self._expect(TokenKind.VAL)
         name = self._expect(TokenKind.IDENT, "Expected variable name").value
         type_ann: TypeExpr | None = None
@@ -332,6 +351,7 @@ class Parser:
     # ------------------------------------------------------------------
 
     def _parse_statement(self) -> Statement:
+        """Parse statement."""
         if self._check(TokenKind.VAL):
             return self._parse_val()
         if self._check(TokenKind.RETURN):
@@ -353,6 +373,7 @@ class Parser:
         return ExprStmt(expr=expr)
 
     def _parse_return(self) -> ReturnStmt:
+        """Parse return."""
         self._expect(TokenKind.RETURN)
         value: Expr | None = None
         if not self._check(TokenKind.NEWLINE) and not self._check(TokenKind.EOF) and not self._check(TokenKind.END):
@@ -361,12 +382,14 @@ class Parser:
         return ReturnStmt(value=value)
 
     def _parse_assert(self) -> AssertStmt:
+        """Parse assert."""
         self._expect(TokenKind.ASSERT)
         cond = self._parse_expr()
         self._expect_line_end()
         return AssertStmt(condition=cond)
 
     def _parse_emit(self) -> EmitStmt:
+        """Parse emit."""
         self._expect(TokenKind.EMIT)
         value = self._parse_expr()
         self._expect_line_end()
@@ -377,6 +400,7 @@ class Parser:
     # ------------------------------------------------------------------
 
     def _try_parse_constraint(self) -> Constraint | None:
+        """Try parse constraint."""
         if self._check(TokenKind.MUST):
             self._advance()
             self._expect(TokenKind.COLON)
@@ -499,9 +523,11 @@ class Parser:
 
 
     def _parse_expr(self) -> Expr:
+        """Parse expr."""
         return self._parse_or()
 
     def _parse_or(self) -> Expr:
+        """Parse or."""
         left = self._parse_and()
         while self._match(TokenKind.OR):
             right = self._parse_and()
@@ -509,6 +535,7 @@ class Parser:
         return left
 
     def _parse_and(self) -> Expr:
+        """Parse and."""
         left = self._parse_equality()
         while self._match(TokenKind.AND):
             right = self._parse_equality()
@@ -516,6 +543,7 @@ class Parser:
         return left
 
     def _parse_equality(self) -> Expr:
+        """Parse equality."""
         left = self._parse_comparison()
         while True:
             if self._match(TokenKind.EQ):
@@ -527,6 +555,7 @@ class Parser:
         return left
 
     def _parse_comparison(self) -> Expr:
+        """Parse comparison."""
         left = self._parse_addition()
         while True:
             if self._match(TokenKind.LT):
@@ -542,6 +571,7 @@ class Parser:
         return left
 
     def _parse_addition(self) -> Expr:
+        """Parse addition."""
         left = self._parse_multiplication()
         while True:
             if self._match(TokenKind.PLUS):
@@ -553,6 +583,7 @@ class Parser:
         return left
 
     def _parse_multiplication(self) -> Expr:
+        """Parse multiplication."""
         left = self._parse_unary()
         while True:
             if self._match(TokenKind.STAR):
@@ -566,6 +597,7 @@ class Parser:
         return left
 
     def _parse_unary(self) -> Expr:
+        """Parse unary."""
         if self._match(TokenKind.MINUS):
             return UnaryOp(op="-", operand=self._parse_unary())
         if self._match(TokenKind.NOT):
@@ -573,6 +605,7 @@ class Parser:
         return self._parse_call()
 
     def _parse_call(self) -> Expr:
+        """Parse call."""
         expr = self._parse_primary()
         while True:
             if self._match(TokenKind.LPAREN):
@@ -591,6 +624,7 @@ class Parser:
         return expr
 
     def _parse_primary(self) -> Expr:
+        """Parse primary."""
         tok = self._current()
 
         if tok.kind == TokenKind.INT_LIT:
@@ -638,6 +672,7 @@ class Parser:
         raise ParseError(f"Unexpected token in expression", tok)
 
     def _parse_if_expr(self) -> IfExpr:
+        """Parse if expr."""
         self._expect(TokenKind.IF)
         cond = self._parse_expr()
         self._expect_line_end()
@@ -661,6 +696,7 @@ class Parser:
         return IfExpr(condition=cond, then_body=then_body, else_body=else_body)
 
     def _parse_list_literal(self) -> ListLiteral:
+        """Parse list literal."""
         self._expect(TokenKind.LBRACKET)
         elements: list[Expr] = []
         if not self._check(TokenKind.RBRACKET):
@@ -681,6 +717,7 @@ class Parser:
     _GENERIC_TYPES = {TokenKind.LIST_TYPE, TokenKind.MAP_TYPE, TokenKind.OPTION_TYPE, TokenKind.RESULT_TYPE}
 
     def _parse_type(self) -> TypeExpr:
+        """Parse type."""
         tok = self._current()
 
         if tok.kind in self._PROB_TYPES:
@@ -721,6 +758,7 @@ class Parser:
     # ------------------------------------------------------------------
 
     def _parse_param_list(self) -> list[Param]:
+        """Parse param list."""
         params: list[Param] = []
         if self._check(TokenKind.RPAREN):
             return params
@@ -730,12 +768,14 @@ class Parser:
         return params
 
     def _parse_param(self) -> Param:
+        """Parse param."""
         name = self._expect(TokenKind.IDENT, "Expected parameter name").value
         self._expect(TokenKind.COLON, "Expected ':' after parameter name")
         type_ann = self._parse_type()
         return Param(name=name, type_ann=type_ann)
 
     def _parse_ident_list_bracket(self) -> list[str]:
+        """Parse ident list bracket."""
         self._expect(TokenKind.LBRACKET, "Expected '['")
         items: list[str] = []
         if not self._check(TokenKind.RBRACKET):
@@ -746,12 +786,14 @@ class Parser:
         return items
 
     def _parse_ident_list_comma(self) -> list[str]:
+        """Parse ident list comma."""
         items: list[str] = [self._advance().value]
         while self._match(TokenKind.COMMA):
             items.append(self._advance().value)
         return items
 
     def _parse_quality_chain(self) -> list[str]:
+        """Parse quality chain."""
         items: list[str] = [self._advance().value]
         while self._match(TokenKind.GT):
             items.append(self._advance().value)

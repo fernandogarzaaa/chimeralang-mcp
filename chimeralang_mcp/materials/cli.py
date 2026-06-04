@@ -1,3 +1,4 @@
+"""Cli."""
 from __future__ import annotations
 
 import argparse
@@ -9,6 +10,7 @@ from .loader import MaterialRegistry
 
 
 def run_materials_cli(argv: Sequence[str]) -> int:
+    """Run materials cli."""
     parser = argparse.ArgumentParser(prog="chimeralang-mcp", description="ChimeraLang MCP materials commands")
     parser.add_argument("command", choices=["sync", "build", "status", "licenses"])
     parser.add_argument(

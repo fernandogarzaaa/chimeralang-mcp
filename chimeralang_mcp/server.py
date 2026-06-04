@@ -72,22 +72,28 @@ from dataclasses import dataclass as _dataclass, field as _field
 
 
 class _CausalGraph:
+    """CausalGraph."""
     def __init__(self) -> None:
+        """Initialize the instance."""
         self.variables: set = set()
         self.edges: list = []
 
     @property
     def edge_count(self) -> int:
+        """Edge count."""
         return len(self.edges)
 
 
 class _CausalReasoning:
+    """CausalReasoning."""
     def __init__(self) -> None:
+        """Initialize the instance."""
         self.graph = _CausalGraph()
 
     def add_edge(self, cause: str, effect: str, edge_type: str = "causes",
                  strength: float = 0.5, confidence: float = 0.5,
                  confidence_level: str = "observed") -> None:
+        """Add edge."""
         self.graph.variables.update([cause, effect])
         self.graph.edges.append({
             "cause": cause, "effect": effect, "edge_type": edge_type,
@@ -96,6 +102,7 @@ class _CausalReasoning:
         })
 
     def query(self, cause: str | None = None, effect: str | None = None) -> list:
+        """Query."""
         results = self.graph.edges
         if cause:
             results = [e for e in results if e["cause"] == cause]
@@ -104,6 +111,7 @@ class _CausalReasoning:
         return results
 
     def find_causal_paths(self, source: str, target: str, max_depth: int = 6) -> list:
+        """Find causal paths."""
         adj: dict = _defaultdict(list)
         for e in self.graph.edges:
             adj[e["cause"]].append(e["effect"])
@@ -123,6 +131,7 @@ class _CausalReasoning:
 
 
 class _DeliberationEngine:
+    """DeliberationEngine."""
     _AFFIRM = {
         "yes", "should", "adopt", "use", "keep", "proceed", "recommended",
         "valuable", "beneficial", "worthwhile", "safe", "ready", "ship",
@@ -155,6 +164,7 @@ class _DeliberationEngine:
 
     @staticmethod
     def _tok(text: str) -> set[str]:
+        """Tok."""
         return {
             token
             for token in re.sub(r"[^\w\s]", " ", str(text).lower()).split()
@@ -162,9 +172,11 @@ class _DeliberationEngine:
         }
 
     def _semantic_terms(self, text: str) -> set[str]:
+        """Semantic terms."""
         return {self._SYNONYMS.get(token, token) for token in self._tok(text)}
 
     def _stance(self, text: str) -> str:
+        """Stance."""
         lowered = str(text).lower()
         tokens = self._tok(lowered)
         negated_recommendation = bool(re.search(r"\b(?:do not|don't|should not|must not|cannot|can't)\b", lowered))
@@ -177,6 +189,7 @@ class _DeliberationEngine:
         return "mixed"
 
     def _semantic_similarity(self, left: dict[str, Any], right: dict[str, Any], prompt_terms: set[str]) -> float:
+        """Semantic similarity."""
         left_text = f"{left.get('perspective', '')} {left.get('content', '')}"
         right_text = f"{right.get('perspective', '')} {right.get('content', '')}"
         left_terms = self._semantic_terms(left_text)
@@ -192,6 +205,7 @@ class _DeliberationEngine:
         return min(1.0, stance_sim * 0.62 + prompt_overlap * 0.23 + term_sim * 0.15)
 
     def deliberate(self, prompt: str, perspectives: list, mode: str = "semantic") -> dict:
+        """Deliberate."""
         if not perspectives:
             return {"consensus": None, "perspectives": [], "divergence": 1.0}
         if mode == "lexical_consensus":
@@ -256,17 +270,20 @@ class _DeliberationEngine:
 
 
 class _SafetyLayer:
+    """SafetyLayer."""
     _PATTERNS = [
         r"\bharm\b", r"\bkill\b", r"\battack\b", r"\bweapon\b", r"\bexploit\b",
         r"\bmalware\b", r"\bvirus\b", r"\bpoison\b", r"\bterror\b", r"\bself.harm\b",
     ]
 
     def __init__(self) -> None:
+        """Initialize the instance."""
         self._blocked_count = 0
         self._allowed_count = 0
         self._compiled = [re.compile(p, re.IGNORECASE) for p in self._PATTERNS]
 
     def validate_content(self, content: str) -> tuple[bool, str]:
+        """Validate content."""
         for pat in self._compiled:
             if pat.search(content):
                 self._blocked_count += 1
@@ -276,6 +293,7 @@ class _SafetyLayer:
 
 
 class _EthicalReasoning:
+    """EthicalReasoning."""
     _VIOLATIONS = {
         "non_maleficence": [r"\bharm\b", r"\bhurt\b", r"\bdamage\b", r"\binjure\b"],
         "autonomy":        [r"\bforce\b", r"\bmanipulate\b", r"\bcoerce\b"],
@@ -288,6 +306,7 @@ class _EthicalReasoning:
     }
 
     def evaluate_action(self, action_desc: str) -> dict:
+        """Evaluate action."""
         violated = [p for p, pats in self._VIOLATIONS.items()
                     if any(re.search(pat, action_desc, re.IGNORECASE) for pat in pats)]
         upheld   = [p for p, pats in self._UPHELD.items()
@@ -305,6 +324,7 @@ class _EthicalReasoning:
 
 @_dataclass
 class _KBEntry:
+    """KBEntry."""
     entry_id: str
     content:  str
     category: str
@@ -312,7 +332,9 @@ class _KBEntry:
 
 
 class _KnowledgeBase:
+    """KnowledgeBase."""
     def __init__(self, entries: list[dict[str, Any]] | None = None) -> None:
+        """Initialize the instance."""
         self._entries: dict[str, _KBEntry] = {}
         for item in entries or []:
             entry = _KBEntry(
@@ -325,12 +347,14 @@ class _KnowledgeBase:
                 self._entries[entry.entry_id] = entry
 
     def add(self, content: str, category: str = "general", tags: list | None = None) -> _KBEntry:
+        """Add."""
         eid = _hashlib.sha256(f"{content}{time.time()}".encode()).hexdigest()[:12]
         entry = _KBEntry(entry_id=eid, content=content, category=category, tags=tags or [])
         self._entries[eid] = entry
         return entry
 
     def search(self, query: str) -> list:
+        """Search."""
         q = query.lower()
         return [
             {"entry_id": e.entry_id, "content": e.content,
@@ -341,6 +365,7 @@ class _KnowledgeBase:
         ]
 
     def snapshot(self) -> list[dict[str, Any]]:
+        """Snapshot."""
         return [
             {"entry_id": e.entry_id, "content": e.content, "category": e.category, "tags": e.tags}
             for e in self._entries.values()
@@ -348,40 +373,50 @@ class _KnowledgeBase:
 
 
 class _WorldModel:
+    """WorldModel."""
     def __init__(self, facts: dict[str, Any] | None = None) -> None:
+        """Initialize the instance."""
         self._facts: dict[str, Any] = dict(facts or {})
 
     def update(self, key: str, value: Any, confidence: float = 0.8) -> dict:
+        """Update."""
         self._facts[key] = {"value": value, "confidence": confidence, "updated_at": time.time()}
         return {"updated": key, "fact_count": len(self._facts)}
 
     def query(self, key: str | None = None) -> dict:
+        """Query."""
         if key:
             return self._facts.get(key, {"error": f"Key '{key}' not found"})
         return {"facts": self._facts, "fact_count": len(self._facts)}
 
     def snapshot(self) -> dict[str, Any]:
+        """Snapshot."""
         return dict(self._facts)
 
 
 class _SelfModel:
+    """SelfModel."""
     def __init__(
         self,
         capabilities: dict[str, Any] | None = None,
         observations: list[Any] | None = None,
     ) -> None:
+        """Initialize the instance."""
         self._capabilities: dict[str, Any] = dict(capabilities or {})
         self._observations:  list[Any] = list(observations or [])
 
     def update(self, capability: str, level: str = "present", evidence: str = "") -> dict:
+        """Update."""
         self._capabilities[capability] = {"level": level, "evidence": evidence}
         return {"updated": capability, "capability_count": len(self._capabilities)}
 
     def reflect(self) -> dict:
+        """Reflect."""
         return {"capabilities": self._capabilities,
                 "observations": self._observations[-10:]}
 
     def snapshot(self) -> dict[str, Any]:
+        """Snapshot."""
         return {
             "capabilities": dict(self._capabilities),
             "observations": list(self._observations),
@@ -389,11 +424,14 @@ class _SelfModel:
 
 
 class _MemoryStore:
+    """MemoryStore."""
     def __init__(self, entries: list[dict[str, Any]] | None = None) -> None:
+        """Initialize the instance."""
         self._entries: list[dict[str, Any]] = list(entries or [])
 
     def store(self, content: str, tags: list | None = None,
               importance: float = 0.5) -> dict:
+        """Store."""
         entry = {"id": len(self._entries), "content": content,
                  "tags": tags or [], "importance": importance,
                  "stored_at": time.time()}
@@ -401,6 +439,7 @@ class _MemoryStore:
         return {"stored": True, "id": entry["id"], "total": len(self._entries)}
 
     def recall(self, query: str | None = None, limit: int = 10) -> dict:
+        """Recall."""
         entries = self._entries
         if query:
             q = query.lower()
@@ -411,29 +450,36 @@ class _MemoryStore:
                                   reverse=True)[:limit]}
 
     def snapshot(self) -> list[dict[str, Any]]:
+        """Snapshot."""
         return list(self._entries)
 
 
 class _MetaLearner:
+    """MetaLearner."""
     def __init__(self, adaptations: list[dict[str, Any]] | None = None) -> None:
+        """Initialize the instance."""
         self._adaptations: list[dict[str, Any]] = list(adaptations or [])
 
     def record_adaptation(self, context: str = "", action: str = "",
                           outcome: str = "", confidence: float = 0.5) -> dict:
+        """Record adaptation."""
         entry = {"context": context, "action": action, "outcome": outcome,
                  "confidence": confidence, "recorded_at": time.time()}
         self._adaptations.append(entry)
         return {"recorded": True, "total_adaptations": len(self._adaptations)}
 
     def get_stats(self) -> dict:
+        """Get stats."""
         return {"total_adaptations": len(self._adaptations),
                 "recent": self._adaptations[-5:]}
 
     def snapshot(self) -> list[dict[str, Any]]:
+        """Snapshot."""
         return list(self._adaptations)
 
 
 def _quantum_vote(responses: list, timeout_s: float = 5.0) -> dict:
+    """Quantum vote."""
     if not responses:
         return {"error": "No responses provided"}
     scores: dict[str, float] = _defaultdict(float)
@@ -459,6 +505,7 @@ def _quantum_vote(responses: list, timeout_s: float = 5.0) -> dict:
 
 
 def _plan_goals(goal: str) -> dict:
+    """Plan goals."""
     g = goal.lower()
 
     # keyword-based strategy detection (ordered most-specific first)
@@ -546,6 +593,7 @@ class _CostTracker:
     """In-memory ring buffer of the last 100 cost events."""
 
     def __init__(self, maxlen: int = 100, history: list[dict[str, Any]] | None = None) -> None:
+        """Initialize the instance."""
         self._history: collections.deque[dict[str, Any]] = _collections.deque(maxlen=maxlen)
         for entry in history or []:
             self._history.append(dict(entry))
@@ -557,6 +605,7 @@ class _CostTracker:
         model: str = _DEFAULT_MODEL,
         label: str = "",
     ) -> dict[str, Any]:
+        """Record."""
         input_price, _ = _MODEL_PRICING.get(model, _MODEL_PRICING[_DEFAULT_MODEL])
         cost_before  = round(tokens_before * input_price / 1_000_000, 6)
         cost_after   = round(tokens_after  * input_price / 1_000_000, 6)
@@ -579,6 +628,7 @@ class _CostTracker:
         return entry
 
     def summary(self) -> dict[str, Any]:
+        """Summary."""
         history = list(self._history)
         total_tokens_saved = sum(e["tokens_saved"] for e in history)
         total_cost_saved   = round(sum(e["savings"] for e in history), 6)
@@ -596,6 +646,7 @@ class _CostTracker:
         }
 
     def snapshot(self) -> list[dict[str, Any]]:
+        """Snapshot."""
         return list(self._history)
 
 
@@ -629,6 +680,7 @@ def _resolve_focus(
     prompt: str = "",
     messages: list[dict[str, Any]] | None = None,
 ) -> str:
+    """Resolve focus."""
     focus = str(arguments.get("focus", "") or "").strip()
     if focus:
         return focus
@@ -658,16 +710,19 @@ _cost_tracker_cache:  dict[str, _CostTracker]    = {}
 class _EmbodiedState:
     """Lightweight sensor/action state simulator."""
     def __init__(self) -> None:
+        """Initialize the instance."""
         self.position    = {"x": 0.0, "y": 0.0, "z": 0.0}
         self.perception  = {"objects": [], "environment": "unknown"}
         self.action_log: list[dict[str, Any]]  = []
         self.energy      = 1.0
 
     def perceive(self, objects: list[str], environment: str) -> dict[str, Any]:
+        """Perceive."""
         self.perception = {"objects": objects, "environment": environment or "unknown"}
         return {"perceived": True, "objects": objects, "environment": environment}
 
     def act(self, action_name: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Act."""
         cost = min(0.05 * (1 + len(params)), self.energy)
         self.energy = max(0.0, self.energy - cost)
         entry = {"action": action_name, "params": params, "energy_after": round(self.energy, 3)}
@@ -677,6 +732,7 @@ class _EmbodiedState:
         return {"executed": True, **entry}
 
     def status(self) -> dict[str, Any]:
+        """Status."""
         return {
             "position":   self.position,
             "perception": self.perception,
@@ -686,6 +742,7 @@ class _EmbodiedState:
         }
 
     def reset(self) -> dict[str, Any]:
+        """Reset."""
         self.__init__()
         return {"reset": True, "energy": 1.0}
 
@@ -693,9 +750,11 @@ class _EmbodiedState:
 class _SocialCognition:
     """Interaction history tracker per named agent."""
     def __init__(self) -> None:
+        """Initialize the instance."""
         self._agents: dict[str, dict[str, Any]] = {}
 
     def record_interaction(self, agent: str, topic: str, sentiment: float) -> dict[str, Any]:
+        """Record interaction."""
         sentiment = max(-1.0, min(1.0, sentiment))
         if agent not in self._agents:
             self._agents[agent] = {
@@ -713,6 +772,7 @@ class _SocialCognition:
                 "relationship_strength": rec["relationship_strength"]}
 
     def query(self, agent: str) -> dict[str, Any]:
+        """Query."""
         if agent not in self._agents:
             return {"agent": agent, "found": False}
         rec = self._agents[agent]
@@ -723,16 +783,19 @@ class _SocialCognition:
                 "relationship_strength": rec["relationship_strength"]}
 
     def list_agents(self) -> dict[str, Any]:
+        """List agents."""
         return {"agents": list(self._agents.keys()), "count": len(self._agents)}
 
 
 class _TransferLearner:
     """Domain analogy mapper for cross-domain transfer."""
     def __init__(self) -> None:
+        """Initialize the instance."""
         self._mappings: list[dict[str, Any]] = []
 
     def add_mapping(self, source: str, target: str, concept: str,
                     analogy: str, confidence: float) -> dict[str, Any]:
+        """Add mapping."""
         entry = {"source_domain": source, "target_domain": target,
                  "concept": concept, "analogy": analogy,
                  "confidence": round(max(0.0, min(1.0, confidence)), 3)}
@@ -740,6 +803,7 @@ class _TransferLearner:
         return {"added": True, "total_mappings": len(self._mappings), **entry}
 
     def query(self, source: str, target: str) -> dict[str, Any]:
+        """Query."""
         matches = [m for m in self._mappings
                    if (not source or m["source_domain"] == source)
                    and (not target or m["target_domain"] == target)]
@@ -748,6 +812,7 @@ class _TransferLearner:
                 "source_domain": source, "target_domain": target}
 
     def list_all(self) -> dict[str, Any]:
+        """List all."""
         domains = list({(m["source_domain"], m["target_domain"]) for m in self._mappings})
         return {"total_mappings": len(self._mappings),
                 "domain_pairs": [{"source": s, "target": t} for s, t in domains]}
@@ -756,10 +821,12 @@ class _TransferLearner:
 class _EvolutionEngine:
     """Fitness-ranked candidate selector via generational selection + mutation."""
     def __init__(self) -> None:
+        """Initialize the instance."""
         self._last_run: dict[str, Any] = {}
 
     def run(self, candidates: list[dict[str, Any]], generations: int,
             mutation_rate: float, survival_ratio: float) -> dict[str, Any]:
+        """Run."""
         import random as _random
         pop = [dict(c) for c in candidates]
         history: list[dict[str, Any]] = []
@@ -783,6 +850,7 @@ class _EvolutionEngine:
         return result
 
     def info(self) -> dict[str, Any]:
+        """Info."""
         if not self._last_run:
             return {"note": "No evolution run yet. Call with action=run and candidates list."}
         return {"last_run_best": self._last_run.get("best"),
@@ -796,6 +864,7 @@ _evolve_inst:        _EvolutionEngine | None  = None
 
 
 def _get_embodied() -> _EmbodiedState:
+    """Get embodied."""
     global _embodied_inst
     if _embodied_inst is None:
         _embodied_inst = _EmbodiedState()
@@ -803,6 +872,7 @@ def _get_embodied() -> _EmbodiedState:
 
 
 def _get_social() -> _SocialCognition:
+    """Get social."""
     global _social_inst
     if _social_inst is None:
         _social_inst = _SocialCognition()
@@ -810,6 +880,7 @@ def _get_social() -> _SocialCognition:
 
 
 def _get_transfer() -> _TransferLearner:
+    """Get transfer."""
     global _transfer_inst
     if _transfer_inst is None:
         _transfer_inst = _TransferLearner()
@@ -817,6 +888,7 @@ def _get_transfer() -> _TransferLearner:
 
 
 def _get_evolve() -> _EvolutionEngine:
+    """Get evolve."""
     global _evolve_inst
     if _evolve_inst is None:
         _evolve_inst = _EvolutionEngine()
@@ -824,6 +896,7 @@ def _get_evolve() -> _EvolutionEngine:
 
 
 def _get_causal() -> _CausalReasoning:
+    """Get causal."""
     global _causal_reasoning
     if _causal_reasoning is None:
         _causal_reasoning = _CausalReasoning()
@@ -831,6 +904,7 @@ def _get_causal() -> _CausalReasoning:
 
 
 def _get_deliberation() -> _DeliberationEngine:
+    """Get deliberation."""
     global _deliberation_engine
     if _deliberation_engine is None:
         _deliberation_engine = _DeliberationEngine()
@@ -838,6 +912,7 @@ def _get_deliberation() -> _DeliberationEngine:
 
 
 def _get_safety() -> _SafetyLayer:
+    """Get safety."""
     global _safety_layer
     if _safety_layer is None:
         _safety_layer = _SafetyLayer()
@@ -845,6 +920,7 @@ def _get_safety() -> _SafetyLayer:
 
 
 def _get_ethical() -> _EthicalReasoning:
+    """Get ethical."""
     global _ethical_reasoner
     if _ethical_reasoner is None:
         _ethical_reasoner = _EthicalReasoning()
@@ -852,10 +928,12 @@ def _get_ethical() -> _EthicalReasoning:
 
 
 def _state_namespace(arguments: dict[str, Any]) -> str:
+    """State namespace."""
     return str(arguments.get("namespace", "default")).strip() or "default"
 
 
 def _get_materials() -> MaterialRegistry:
+    """Get materials."""
     global _materials_registry
     base_dir = str(getattr(_store, "_base_dir", "")) or None
     if _materials_registry is None or (base_dir and str(_materials_registry.base_dir) != base_dir):
@@ -864,6 +942,7 @@ def _get_materials() -> MaterialRegistry:
 
 
 def _get_kb(namespace: str = "default") -> _KnowledgeBase:
+    """Get kb."""
     if namespace not in _kb_cache:
         _kb_cache[namespace] = _KnowledgeBase(
             entries=_store.load("knowledge", namespace, [])
@@ -872,10 +951,12 @@ def _get_kb(namespace: str = "default") -> _KnowledgeBase:
 
 
 def _save_kb(namespace: str) -> str:
+    """Save kb."""
     return _store.save("knowledge", namespace, _get_kb(namespace).snapshot())
 
 
 def _get_world_model(namespace: str = "default") -> _WorldModel:
+    """Get world model."""
     if namespace not in _world_model_cache:
         _world_model_cache[namespace] = _WorldModel(
             facts=_store.load("world_model", namespace, {})
@@ -884,10 +965,12 @@ def _get_world_model(namespace: str = "default") -> _WorldModel:
 
 
 def _save_world_model(namespace: str) -> str:
+    """Save world model."""
     return _store.save("world_model", namespace, _get_world_model(namespace).snapshot())
 
 
 def _get_self_model(namespace: str = "default") -> _SelfModel:
+    """Get self model."""
     if namespace not in _self_model_cache:
         snapshot = _store.load("self_model", namespace, {"capabilities": {}, "observations": []})
         _self_model_cache[namespace] = _SelfModel(
@@ -898,10 +981,12 @@ def _get_self_model(namespace: str = "default") -> _SelfModel:
 
 
 def _save_self_model(namespace: str) -> str:
+    """Save self model."""
     return _store.save("self_model", namespace, _get_self_model(namespace).snapshot())
 
 
 def _get_memory(namespace: str = "default") -> _MemoryStore:
+    """Get memory."""
     if namespace not in _memory_store_cache:
         _memory_store_cache[namespace] = _MemoryStore(
             entries=_store.load("memory", namespace, [])
@@ -910,10 +995,12 @@ def _get_memory(namespace: str = "default") -> _MemoryStore:
 
 
 def _save_memory(namespace: str) -> str:
+    """Save memory."""
     return _store.save("memory", namespace, _get_memory(namespace).snapshot())
 
 
 def _get_meta_learner(namespace: str = "default") -> _MetaLearner:
+    """Get meta learner."""
     if namespace not in _meta_learner_cache:
         _meta_learner_cache[namespace] = _MetaLearner(
             adaptations=_store.load("meta_learner", namespace, [])
@@ -922,10 +1009,12 @@ def _get_meta_learner(namespace: str = "default") -> _MetaLearner:
 
 
 def _save_meta_learner(namespace: str) -> str:
+    """Save meta learner."""
     return _store.save("meta_learner", namespace, _get_meta_learner(namespace).snapshot())
 
 
 def _get_cost_tracker(namespace: str = "default") -> _CostTracker:
+    """Get cost tracker."""
     if namespace not in _cost_tracker_cache:
         _cost_tracker_cache[namespace] = _CostTracker(
             history=_store.load("cost_tracker", namespace, [])
@@ -934,6 +1023,7 @@ def _get_cost_tracker(namespace: str = "default") -> _CostTracker:
 
 
 def _save_cost_tracker(namespace: str) -> str:
+    """Save cost tracker."""
     return _store.save("cost_tracker", namespace, _get_cost_tracker(namespace).snapshot())
 
 
@@ -982,6 +1072,7 @@ def _walk_compress(
     path: list[str],
     compressed: list[dict[str, Any]],
 ) -> Any:
+    """Walk compress."""
     if isinstance(node, dict):
         return {
             key: (
@@ -1017,6 +1108,7 @@ def _maybe_compress_oversized(
     data: dict[str, Any],
     rendered_size: int,
 ) -> dict[str, Any]:
+    """Maybe compress oversized."""
     if (
         tool_name in _NO_AUTO_COMPRESS_TOOLS
         or rendered_size < _RESPONSE_COMPRESS_THRESHOLD
@@ -1049,6 +1141,7 @@ def _dedup_store_previews() -> bool:
 
 
 def _dedup_key(tool_name: str, tool_input: Any) -> str:
+    """Dedup key."""
     try:
         canonical = json.dumps(tool_input, sort_keys=True, ensure_ascii=True, default=str)
     except Exception:
@@ -1057,11 +1150,13 @@ def _dedup_key(tool_name: str, tool_input: Any) -> str:
 
 
 def _dedup_load(namespace: str) -> list[dict[str, Any]]:
+    """Dedup load."""
     raw = _store.load(_DEDUP_KIND, namespace, [])
     return raw if isinstance(raw, list) else []
 
 
 def _dedup_lookup(namespace: str, key: str) -> dict[str, Any] | None:
+    """Dedup lookup."""
     for entry in _dedup_load(namespace):
         if entry.get("key") == key:
             return entry
@@ -1074,6 +1169,7 @@ def _dedup_record(
     tool_input: Any,
     response_text: str,
 ) -> dict[str, Any]:
+    """Dedup record."""
     key = _dedup_key(tool_name, tool_input)
     entries = _dedup_load(namespace)
     now = time.time()
@@ -1122,6 +1218,7 @@ def _dedup_record(
 
 
 def _dedup_clear(namespace: str) -> int:
+    """Dedup clear."""
     n = len(_dedup_load(namespace))
     _store.save(_DEDUP_KIND, namespace, [])
     return n
@@ -1143,6 +1240,7 @@ def _compress_log(
     tail_lines: int = 100,
     context_lines: int = 2,
 ) -> dict[str, Any]:
+    """Compress log."""
     patterns = [p.lower() for p in (keep_patterns or _LOG_KEEP_PATTERNS_DEFAULT)]
     lines = text.splitlines()
     n = len(lines)
@@ -1199,6 +1297,7 @@ _CACHE_MAX_BREAKPOINTS = 4
 
 
 def _cache_min_tokens(model: str) -> int:
+    """Cache min tokens."""
     low = (model or "").lower()
     for prefix, threshold in _CACHE_MIN_TOKENS_BY_MODEL_PREFIX:
         if prefix in low:
@@ -1211,6 +1310,7 @@ def _build_cache_blocks(
     model: str,
     max_breakpoints: int = _CACHE_MAX_BREAKPOINTS,
 ) -> dict[str, Any]:
+    """Build cache blocks."""
     min_tokens = _cache_min_tokens(model)
     output: list[dict[str, Any]] = []
     breakpoints_used = 0
@@ -1269,6 +1369,7 @@ def _audit_overhead(
     tool_definitions: list[dict[str, Any]],
     mcp_servers: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    """Audit overhead."""
     sys_tokens = _tbm.count_tokens(system_prompt or "")
     tool_breakdown: list[dict[str, Any]] = []
     tool_tokens_total = 0
@@ -1362,6 +1463,7 @@ def _budget_snapshot(tool_name: str, namespace: str) -> dict[str, Any]:
 
 
 def _ok(data: Any) -> CallToolResult:
+    """Ok."""
     ctx = _call_context.get()
     if (
         ctx is not None
@@ -1387,6 +1489,7 @@ def _ok(data: Any) -> CallToolResult:
     )
 
 def _err(msg: str) -> CallToolResult:
+    """Err."""
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps({"error": msg}))],
         isError=True,
@@ -1450,14 +1553,17 @@ _POLICIES: dict[str, dict[str, Any]] = {
 
 
 def _record_trace(namespace: str, envelope: ResultEnvelope) -> str:
+    """Record trace."""
     return _store.append("traces", namespace, envelope.to_dict(), max_items=300)
 
 
 def _record_audit(namespace: str, entry: dict[str, Any]) -> str:
+    """Record audit."""
     return _store.append("audit", namespace, entry, max_items=500)
 
 
 def _policy_details(policy_name: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Policy details."""
     pattern = _get_materials().policy_pattern(policy_name)
     details = dict(config)
     if pattern:
@@ -1472,6 +1578,7 @@ def _policy_details(policy_name: str, config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _dedupe_flags(flags: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Dedupe flags."""
     unique: list[dict[str, Any]] = []
     seen: set[tuple[str, tuple[str, ...]]] = set()
     for flag in flags:
@@ -1487,10 +1594,12 @@ def _dedupe_flags(flags: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _material_usage(pack_types: list[str], source_ids: list[str] | None = None) -> dict[str, Any]:
+    """Material usage."""
     return _get_materials().material_usage(pack_types, source_ids=source_ids)
 
 
 def _extract_claims(text: str, max_claims: int = 10) -> list[dict[str, Any]]:
+    """Extract claims."""
     registry = _get_materials()
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", text) if s.strip()]
     claims: list[dict[str, Any]] = []
@@ -1535,6 +1644,7 @@ def _extract_claims(text: str, max_claims: int = 10) -> list[dict[str, Any]]:
 
 
 def _evidence_text(item: Any) -> str:
+    """Evidence text."""
     if isinstance(item, str):
         return item
     if isinstance(item, dict):
@@ -1546,6 +1656,7 @@ def _evidence_text(item: Any) -> str:
 
 
 def _tokenize_for_match(text: str) -> set[str]:
+    """Tokenize for match."""
     return {
         token
         for token in re.findall(r"[a-z0-9]+", text.lower())
@@ -1554,6 +1665,7 @@ def _tokenize_for_match(text: str) -> set[str]:
 
 
 def _best_evidence_excerpt(claim_tokens: set[str], evidence_text: str) -> str:
+    """Best evidence excerpt."""
     sentences = [segment.strip() for segment in re.split(r"(?<=[.!?])\s+", evidence_text) if segment.strip()]
     best = evidence_text[:240]
     best_score = -1.0
@@ -1566,6 +1678,7 @@ def _best_evidence_excerpt(claim_tokens: set[str], evidence_text: str) -> str:
 
 
 def _contradiction_score(claim_text: str, evidence_text: str, overlap_score: float) -> float:
+    """Contradiction score."""
     claim_lower = claim_text.lower()
     evidence_lower = evidence_text.lower()
     score = 0.0
@@ -1649,6 +1762,7 @@ def _retrieve_evidence(
 
 
 def _verify_method_note(method: str) -> str:
+    """Verify method note."""
     if method == "nli":
         return (
             "Verdicts are from a local cross-encoder NLI model "
@@ -1673,6 +1787,7 @@ def _verify_claims_against_evidence(
     evidence: list[Any],
     method: str = "lexical",
 ) -> dict[str, Any]:
+    """Verify claims against evidence."""
     registry = _get_materials()
     claims = [_normalize_claim_input(claim) for claim in claims]
     prefix = {"lexical": "lexically", "nli": "nli", "llm": "llm"}.get(method, "lexically")
@@ -1875,6 +1990,7 @@ def _build_envelope(
     metadata: dict[str, Any] | None = None,
     warnings: list[str] | None = None,
 ) -> dict[str, Any]:
+    """Build envelope."""
     envelope = ResultEnvelope.coerce(
         value,
         kind=kind,
@@ -1904,6 +2020,7 @@ def _normalize_envelope_input(
     confidence_source: str = "",
     metadata: dict[str, Any] | None = None,
 ) -> ResultEnvelope:
+    """Normalize envelope input."""
     envelope = ResultEnvelope.coerce(
         payload,
         kind="tool_output",
@@ -1915,6 +2032,7 @@ def _normalize_envelope_input(
     return envelope
 
 def _run(source: str) -> dict[str, Any]:
+    """Run."""
     tokens = Lexer(source).tokenize()
     ast    = Parser(tokens).parse()
     vm     = ChimeraVM()
@@ -1949,6 +2067,7 @@ def _run(source: str) -> dict[str, Any]:
 
 @server.list_tools()
 async def list_tools() -> list[Tool]:
+    """List tools."""
     return [
         Tool(
             name="chimera_run",
@@ -3167,6 +3286,7 @@ async def list_tools() -> list[Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
+    """Call tool."""
     _ns_for_advisory = (
         _state_namespace(arguments) if isinstance(arguments, dict) else "default"
     )
@@ -4279,6 +4399,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
             if algorithm == "classic":
                 def _compress_message_history(msgs: list[dict[str, Any]]) -> str:
+                    """Compress message history."""
                     if not msgs:
                         return ""
                     msg_text = "\n".join(
@@ -4482,6 +4603,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
             if preserve_code:
                 def _stash(m: "_re.Match[str]") -> str:
+                    """Stash."""
                     code_blocks.append(m.group(0))
                     return f"\x00CODE{len(code_blocks) - 1}\x00"
                 result_text = _re.sub(r"```[\s\S]*?```", _stash, result_text)
@@ -4619,6 +4741,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             work = text
             if preserve_code:
                 def _stash(m: "_re.Match[str]") -> str:
+                    """Stash."""
                     code_blocks.append(m.group(0))
                     return f"\x00CODE{len(code_blocks) - 1}\x00"
                 work = _re.sub(r"```[\s\S]*?```", _stash, work)
@@ -5309,6 +5432,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 }
 
                 def _csm_compress(text: str) -> str:
+                    """Csm compress."""
                     t = _re.sub(r"[ \t]+", " ", text)
                     t = _re.sub(r"\n{3,}", "\n\n", t).strip()
                     for _p in _CSM_FILLER:
@@ -5519,6 +5643,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             }
 
             def _tok(s: str) -> list[str]:
+                """Tok."""
                 return [w for w in _re.findall(r"\b[a-z]{3,}\b", s.lower()) if w not in _STOP]
 
             n     = len(sentences)
@@ -5530,6 +5655,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     df[w] += 1
 
             def _score(s: str, pos: int) -> float:
+                """Score."""
                 words = _tok(s)
                 if not words:
                     return 0.0
@@ -5749,6 +5875,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 # ── entrypoint ────────────────────────────────────────────────────────────
 
 async def _async_main() -> None:
+    """Async main."""
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,
@@ -5757,6 +5884,7 @@ async def _async_main() -> None:
         )
 
 def main() -> None:
+    """Main."""
     asyncio.run(_async_main())
 
 if __name__ == "__main__":

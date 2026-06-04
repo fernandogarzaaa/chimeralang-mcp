@@ -31,6 +31,7 @@ ENC = tiktoken.get_encoding("o200k_base")
 
 
 def n_tokens(s: str) -> int:
+    """N tokens."""
     # Whitespace-prefixed: that's how words appear mid-sentence in BPE.
     return len(ENC.encode(" " + s)) if s else 0
 
@@ -99,6 +100,7 @@ def best_glyph_for(eng: str, current: str) -> tuple[str, str, int, int]:
 
 
 def main() -> None:
+    """Main."""
     new_lexicon: dict[str, str] = {}
     diffs: list[dict] = []
     by_source: dict[str, int] = defaultdict(int)

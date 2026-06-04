@@ -1,3 +1,4 @@
+"""Envelope."""
 from __future__ import annotations
 
 import time
@@ -8,6 +9,7 @@ from typing import Any
 
 @dataclass
 class ResultEnvelope:
+    """ResultEnvelope."""
     envelope_version: str = "1.0"
     envelope_id: str = field(default_factory=lambda: str(uuid.uuid4())[:12])
     kind: str = "generic"
@@ -24,10 +26,12 @@ class ResultEnvelope:
     created_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict[str, Any]:
+        """To dict."""
         return asdict(self)
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "ResultEnvelope":
+        """From dict."""
         return cls(
             envelope_version=str(payload.get("envelope_version", "1.0")),
             envelope_id=str(payload.get("envelope_id", str(uuid.uuid4())[:12])),
@@ -57,6 +61,7 @@ class ResultEnvelope:
         sources: list[dict[str, Any]] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> "ResultEnvelope":
+        """Coerce."""
         if isinstance(payload, cls):
             return payload
         if isinstance(payload, dict) and "envelope_id" in payload and "value" in payload:
@@ -72,17 +77,21 @@ class ResultEnvelope:
         )
 
     def add_provenance(self, step: str, **details: Any) -> None:
+        """Add provenance."""
         self.provenance.append({"step": step, "timestamp": time.time(), **details})
 
     def add_transform(self, step: str, **details: Any) -> None:
+        """Add transform."""
         self.transform_history.append({"step": step, "timestamp": time.time(), **details})
 
     def add_constraint(self, constraint: str, passed: bool, **details: Any) -> None:
+        """Add constraint."""
         self.constraints_applied.append(
             {"constraint": constraint, "passed": passed, "timestamp": time.time(), **details}
         )
 
     def with_claims(self, claims: list[dict[str, Any]]) -> "ResultEnvelope":
+        """With claims."""
         self.claims = claims
         return self
 
@@ -93,6 +102,7 @@ def merge_envelopes(
     strategy: str = "weighted",
     merge_value_mode: str = "list",
 ) -> ResultEnvelope:
+    """Merge envelopes."""
     if not envelopes:
         return ResultEnvelope(kind="merged", value=[], confidence=0.0)
 

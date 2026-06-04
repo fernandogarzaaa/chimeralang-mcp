@@ -45,6 +45,7 @@ class SemanticUnavailable(RuntimeError):
 
 
 def available(method: str) -> bool:
+    """Return whether the requested semantic method's dependencies are present."""
     if method == "nli":
         return _nli_available()
     if method == "llm":
@@ -53,6 +54,7 @@ def available(method: str) -> bool:
 
 
 def _nli_available() -> bool:
+    """Return whether sentence-transformers is importable for the nli method."""
     try:
         import sentence_transformers  # noqa: F401
     except ImportError:
@@ -61,6 +63,7 @@ def _nli_available() -> bool:
 
 
 def _llm_available() -> bool:
+    """Return whether the anthropic SDK and an API key are available."""
     try:
         import anthropic  # noqa: F401
     except ImportError:
@@ -70,6 +73,7 @@ def _llm_available() -> bool:
 
 @lru_cache(maxsize=1)
 def _nli_model():
+    """Load and cache the cross-encoder NLI model (lazy, once per process)."""
     try:
         from sentence_transformers import CrossEncoder
     except ImportError as exc:  # pragma: no cover - exercised only without the extra
@@ -81,6 +85,7 @@ def _nli_model():
 
 
 def _softmax(row: list[float]) -> list[float]:
+    """Return the softmax of a row of logits."""
     m = max(row)
     exps = [math.exp(x - m) for x in row]
     total = sum(exps)
@@ -88,6 +93,7 @@ def _softmax(row: list[float]) -> list[float]:
 
 
 def _classify_nli(claim: str, evidence_texts: list[str]) -> dict[str, Any]:
+    """Classify a claim against evidence with the local NLI cross-encoder."""
     if not evidence_texts:
         return {"label": "insufficient", "method": "nli", "model_id": NLI_MODEL_ID,
                 "deterministic": True, "scores": {}}
@@ -115,6 +121,7 @@ def _classify_nli(claim: str, evidence_texts: list[str]) -> dict[str, Any]:
 
 
 def _classify_llm(claim: str, evidence_texts: list[str]) -> dict[str, Any]:
+    """Classify a claim against evidence using the Anthropic LLM judge."""
     try:
         import anthropic
     except ImportError as exc:  # pragma: no cover - exercised only without the extra
@@ -147,6 +154,7 @@ def _classify_llm(claim: str, evidence_texts: list[str]) -> dict[str, Any]:
 
 
 def _parse_llm_verdict(text: str) -> tuple[str, str]:
+    """Extract the (verdict, rationale) pair from the judge's raw response."""
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end != -1 and end > start:
         try:

@@ -24,6 +24,7 @@ from chimera.types import (
 
 
 class HallucinationKind(Enum):
+    """HallucinationKind."""
     BRANCH_DIVERGENCE = auto()     # gate branches disagree significantly
     CONFIDENCE_ANOMALY = auto()    # unexplained confidence spike/drop
     PROMOTION_VIOLATION = auto()   # Explore→Confident without gate
@@ -33,6 +34,7 @@ class HallucinationKind(Enum):
 
 @dataclass(frozen=True, slots=True)
 class HallucinationFlag:
+    """HallucinationFlag."""
     kind: HallucinationKind
     severity: float          # 0.0–1.0
     description: str
@@ -41,12 +43,14 @@ class HallucinationFlag:
 
 @dataclass
 class DetectionReport:
+    """DetectionReport."""
     flags: list[HallucinationFlag] = field(default_factory=list)
     values_scanned: int = 0
     gates_scanned: int = 0
     clean: bool = True
 
     def add(self, flag: HallucinationFlag) -> None:
+        """Add."""
         self.flags.append(flag)
         self.clean = False
 
@@ -59,6 +63,7 @@ class HallucinationDetector:
         divergence_threshold: float = 0.3,
         confidence_spike_threshold: float = 0.4,
     ) -> None:
+        """Initialize the instance."""
         self._div_threshold = divergence_threshold
         self._spike_threshold = confidence_spike_threshold
 

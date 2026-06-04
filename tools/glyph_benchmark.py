@@ -42,11 +42,13 @@ RESULTS_PATH = Path(__file__).parent / "glyph_benchmark_results.json"
 
 
 class Sentence(NamedTuple):
+    """Sentence."""
     domain: str
     text: str
 
 
 def load_corpus(path: Path = CORPUS_PATH) -> list[Sentence]:
+    """Load corpus."""
     sentences: list[Sentence] = []
     current_domain = "uncategorized"
     for raw in path.read_text(encoding="utf-8").splitlines():
@@ -68,6 +70,7 @@ def load_corpus(path: Path = CORPUS_PATH) -> list[Sentence]:
 
 
 def n_tokens(s: str) -> int:
+    """N tokens."""
     return len(ENC.encode(s))
 
 
@@ -94,6 +97,7 @@ def decode_fidelity(original: str, decoded: str) -> float:
 
 
 def run_benchmark(sentences: list[Sentence], validate_anthropic: bool = False) -> dict:
+    """Run benchmark."""
     per_sentence = []
     by_domain: dict[str, list[dict]] = {}
 
@@ -158,6 +162,7 @@ def run_benchmark(sentences: list[Sentence], validate_anthropic: bool = False) -
     # ── aggregations ────────────────────────────────────────────────────
 
     def aggregate(rows: list[dict]) -> dict:
+        """Aggregate."""
         total_eng_tok = sum(r["eng_tokens_o200k"] for r in rows)
         total_gly_tok = sum(r["glyph_tokens_o200k"] for r in rows)
         total_eng_chars = sum(r["eng_chars"] for r in rows)
@@ -204,6 +209,7 @@ def run_benchmark(sentences: list[Sentence], validate_anthropic: bool = False) -
 
 
 def print_report(report: dict) -> None:
+    """Print report."""
     print("=" * 72)
     print("CHIMERA GLYPH — FORMAL BENCHMARK")
     print(f"Tokenizer: {report['tokenizer_proxy']}"
@@ -235,6 +241,7 @@ def print_report(report: dict) -> None:
 
 
 def main() -> None:
+    """Main."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--validate-anthropic", action="store_true",
                         help="Also query the real Anthropic count_tokens API")

@@ -1,3 +1,4 @@
+"""Cli."""
 from __future__ import annotations
 
 import argparse
@@ -32,6 +33,7 @@ def _get_session_namespace(event: dict[str, Any]) -> str:
 
 
 def _hook_emit(event: str, additional_context: str | None) -> None:
+    """Hook emit."""
     if not additional_context:
         return
     payload = {
@@ -44,6 +46,7 @@ def _hook_emit(event: str, additional_context: str | None) -> None:
 
 
 def _read_hook_event() -> dict[str, Any]:
+    """Read hook event."""
     raw = sys.stdin.read().strip()
     if not raw:
         return {}
@@ -54,9 +57,11 @@ def _read_hook_event() -> dict[str, Any]:
 
 
 def _call_optimize_sync(text: str, namespace: str) -> dict[str, Any]:
+    """Call optimize sync."""
     from chimeralang_mcp import server as srv
 
     async def _run() -> dict[str, Any]:
+        """Run."""
         result = await srv.call_tool(
             "chimera_optimize",
             {"text": text, "namespace": namespace, "level": "medium"},
@@ -71,6 +76,7 @@ def _call_optimize_sync(text: str, namespace: str) -> dict[str, Any]:
 
 
 def _hook_user_prompt() -> int:
+    """Hook user prompt."""
     event = _read_hook_event()
     session_namespace = _get_session_namespace(event)
     prompt = str(event.get("prompt", "") or "")
@@ -101,6 +107,7 @@ def _hook_user_prompt() -> int:
 
 
 def _hook_session_start() -> int:
+    """Hook session start."""
     event = _read_hook_event()
     session_namespace = _get_session_namespace(event)
     # Clear session-scoped state to ensure fresh isolation
@@ -114,6 +121,7 @@ def _hook_session_start() -> int:
 
 
 def _is_chimera_tool(tool_name: str) -> bool:
+    """Is chimera tool."""
     return tool_name.startswith("chimera_") or "chimeralang" in tool_name
 
 
@@ -128,6 +136,7 @@ def _record_dedup_safely(namespace: str, tool_name: str, tool_input: Any, respon
 
 
 def _lookup_dedup_safely(namespace: str, tool_name: str, tool_input: Any) -> dict | None:
+    """Lookup dedup safely."""
     try:
         from chimeralang_mcp import server as srv
         key = srv._dedup_key(tool_name, tool_input)
@@ -138,6 +147,7 @@ def _lookup_dedup_safely(namespace: str, tool_name: str, tool_input: Any) -> dic
 
 
 def _hook_post_tool_use() -> int:
+    """Hook post tool use."""
     event = _read_hook_event()
     session_namespace = _get_session_namespace(event)
     tool_name = str(event.get("tool_name") or "")
@@ -173,6 +183,7 @@ def _hook_post_tool_use() -> int:
 
 
 def _input_size(tool_input: Any) -> int:
+    """Input size."""
     if isinstance(tool_input, str):
         return len(tool_input)
     try:
@@ -182,6 +193,7 @@ def _input_size(tool_input: Any) -> int:
 
 
 def _hook_pre_tool_use() -> int:
+    """Hook pre tool use."""
     event = _read_hook_event()
     session_namespace = _get_session_namespace(event)
     tool_name = str(event.get("tool_name") or "")
@@ -224,12 +236,14 @@ def _hook_pre_tool_use() -> int:
 
 
 def _hook_stop() -> int:
+    """Hook stop."""
     event = _read_hook_event()
     session_namespace = _get_session_namespace(event)
     try:
         from chimeralang_mcp import server as srv
 
         async def _run() -> dict:
+            """Run."""
             result = await srv.call_tool(
                 "chimera_session_report",
                 {"namespace": session_namespace, "include_dedup": True},
@@ -263,6 +277,7 @@ def _hook_stop() -> int:
 
 
 def _run_hook(event: str) -> int:
+    """Run hook."""
     if event == "user-prompt":
         return _hook_user_prompt()
     if event == "session-start":
@@ -278,6 +293,7 @@ def _run_hook(event: str) -> int:
 
 
 async def _run_http_server(host: str, port: int) -> None:
+    """Run http server."""
     import anyio
     import uvicorn
     from mcp.server.streamable_http import StreamableHTTPServerTransport
@@ -288,6 +304,7 @@ async def _run_http_server(host: str, port: int) -> None:
     init_options = mcp_server.create_initialization_options()
 
     async def app(scope, receive, send):
+        """App."""
         if scope["type"] == "lifespan":
             while True:
                 message = await receive()
@@ -342,6 +359,7 @@ async def _run_http_server(host: str, port: int) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Main."""
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
         run_stdio_server()

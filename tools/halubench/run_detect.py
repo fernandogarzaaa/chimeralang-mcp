@@ -57,6 +57,7 @@ def _binary_metrics(rows: list[tuple[bool, bool]]) -> dict[str, Any]:
 
 
 async def run(verbose: bool) -> dict[str, Any]:
+    """Score the detect corpus and return aggregate metrics."""
     corpus = json.loads(CORPUS.read_text(encoding="utf-8"))
     out: dict[str, Any] = {}
     for task_name, task in corpus["tasks"].items():
@@ -74,6 +75,7 @@ async def run(verbose: bool) -> dict[str, Any]:
 
 
 def _print_report(results: dict[str, Any]) -> None:
+    """Print a formatted detect metrics report to stdout."""
     print("\n" + "=" * 60)
     print("DetectBench — chimera_detect signal calibration")
     print("=" * 60)
@@ -86,6 +88,7 @@ def _print_report(results: dict[str, Any]) -> None:
 
 
 def main() -> int:
+    """CLI entry point for the DetectBench harness."""
     parser = argparse.ArgumentParser(prog="detectbench")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--update", action="store_true", help="write detect_results.json")
