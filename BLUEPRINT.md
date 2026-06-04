@@ -173,6 +173,30 @@ Independent audit (2026-05-07) identified the project's **real moat**: it's the 
 
 ---
 
+## Phase 5 — Verifiable hallucination detection **[IN PROGRESS]**
+
+**Goal:** Give the hallucination pillar a *published number* (like Glyph's −16%) and a real semantic tier, so `chimera_verify` can catch contradictions that lexical overlap misses — without abandoning the deterministic default.
+
+**Direction (chosen):** Hybrid — keep the deterministic lexical method as the fast default, add an opt-in semantic tier, and benchmark both. The deterministic reproducibility moat (Phases 2–4) stays intact; semantic scoring is additive and optional.
+
+### Sub-tasks
+- [x] **5.1 — Baseline benchmark (HaluBench).** `tools/halubench/` ships a 30-item hand-labeled corpus (10/10/10 across supported/contradicted/insufficient, 5 domains, no `verification_gold` leakage), a runner that scores every item through the live `chimera_verify` tool, and a regression test (`tests/test_halubench.py`) that locks the numbers. **Baseline (lexical): accuracy 0.633, macro-F1 0.525.** Headline finding: **contradiction recall = 0.000** — lexical overlap catches none of the 10 contradictions because claim and evidence share vocabulary. This is the number 5.2 must beat.
+- [ ] **5.2 — Optional semantic tier.** Add `method` param to `chimera_verify` (`lexical` default | `nli` | `llm`). `nli` = small deterministic cross-encoder (optional dep, lazy import); `llm` = Anthropic judge with prompt caching (optional dep). Verdicts stay method-namespaced (`lexically_*` / `nli_*` / `llm_*`). LLM tier is excluded from hash-locked replay/ChimeraBench (non-deterministic, carries `model_id`).
+- [ ] **5.3 — Calibrate `chimera_detect` (stretch).** Report detect's own precision/recall on the HaluBench corpus; optional grounded-RAG (retrieve→score) path.
+
+### Success criteria
+- [x] Published lexical baseline F1, regression-locked
+- [ ] NLI tier beats lexical **contradiction recall** by a measured margin (target: catch the cases lexical labels "supported")
+- [ ] Server still imports & runs with **zero** new hard dependencies (semantic/llm optional + lazy)
+- [ ] Latency documented per tier
+- [ ] No claim on any surface without a number behind it
+
+### What this unlocks
+- The honest end-goal becomes provable: hallucination detection with a *number*, not a vibe.
+- ChimeraBench v2 (LLM-backed tasks, anticipated in Phase 3) gets its first real entries.
+
+---
+
 ## Cross-cutting principles
 
 1. **Honest measurements only.** Every claim ("60% reduction", "deterministic", "cryptographically verifiable") must be backed by a runnable test or a published artifact. No marketing without a benchmark.
