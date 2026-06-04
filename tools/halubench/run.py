@@ -46,8 +46,17 @@ async def _predict(item: dict, method: str) -> str:
     if method != "lexical":
         args["method"] = method
     result = await srv.call_tool("chimera_verify", args)
+    if result.isError:
+        try:
+            msg = json.loads(result.content[0].text).get("error", result.content[0].text)
+        except Exception:
+            msg = "unknown chimera_verify error"
+        raise RuntimeError(f"chimera_verify failed for {item.get('id')} (method={method}): {msg}")
     payload = json.loads(result.content[0].text)
-    return _normalize_verdict(str(payload.get("verdict", "insufficient")))
+    verdict = str(payload.get("verdict", "")).strip()
+    if not verdict:
+        raise RuntimeError(f"chimera_verify returned no verdict for {item.get('id')} (method={method})")
+    return _normalize_verdict(verdict)
 
 
 def _metrics(rows: list[tuple[str, str]]) -> dict[str, Any]:
@@ -117,7 +126,7 @@ def _print_report(summary: dict[str, Any]) -> None:
         print(f"    {label:<14}{c['precision']:>7.3f}{c['recall']:>8.3f}"
               f"{c['f1']:>7.3f}{c['support']:>9}")
     print("\n  confusion (rows=gold, cols=pred):")
-    header = "".join(f"{l[:5]:>9}" for l in LABELS)
+    header = "".join(f"{label[:5]:>9}" for label in LABELS)
     print(f"    {'':<14}{header}")
     for g in LABELS:
         cells = "".join(f"{summary['confusion'][g][p]:>9}" for p in LABELS)

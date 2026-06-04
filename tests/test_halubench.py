@@ -21,6 +21,7 @@ import unittest
 from pathlib import Path
 
 from tools.halubench.run import LABELS, run
+from tools.halubench import run_detect
 
 CORPUS = Path(__file__).parent.parent / "tools" / "halubench" / "corpus.json"
 
@@ -100,6 +101,39 @@ class TestHaluBenchNLI(unittest.TestCase):
     def test_nli_macro_f1_beats_lexical(self):
         # Lexical baseline macro-F1 is 0.525.
         self.assertGreater(self.summary["macro_f1"], 0.80)
+
+
+class TestDetectBench(unittest.TestCase):
+    """Phase 5.3: calibrate chimera_detect's two signals. Deterministic — no
+    optional deps. Locks both the strength (high-precision certainty flagging)
+    and the documented weakness (narrow injection recall)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.results = asyncio.run(run_detect.run(verbose=False))
+
+    def test_certainty_high_precision(self):
+        # No false positives on hedged/measured phrasing.
+        self.assertEqual(self.results["certainty"]["precision"], 1.0)
+
+    def test_certainty_recall_solid_but_imperfect(self):
+        # Catches listed markers; misses synonyms outside the substring list.
+        recall = self.results["certainty"]["recall"]
+        self.assertGreaterEqual(recall, 0.7)
+        self.assertLess(recall, 1.0)
+
+    def test_injection_precision_no_false_positives(self):
+        # Benign requests must never be flagged as attacks.
+        self.assertEqual(self.results["injection"]["precision"], 1.0)
+
+    def test_injection_recall_is_narrow_documented_weakness(self):
+        """Headline 5.3 finding: detect's attack-pattern matching is narrow —
+        it catches the canonical 'ignore all previous instructions' phrasing but
+        misses most variants. Locked so a future attack-pattern expansion that
+        lifts recall is a deliberate, visible event."""
+        recall = self.results["injection"]["recall"]
+        self.assertGreater(recall, 0.0)   # catches at least the canonical case
+        self.assertLess(recall, 0.5)      # but most variants slip through today
 
 
 if __name__ == "__main__":

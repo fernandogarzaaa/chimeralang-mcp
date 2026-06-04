@@ -123,7 +123,7 @@ chimera_csm → chimera_mode(task_description="analyze competing designs")
 
 **4. Claim verification**
 ```
-chimera_csm → chimera_claims(text=<claim>) → chimera_verify(claims=[...], evidence=<source>)
+chimera_csm → chimera_claims(text=<claim>) → chimera_verify(claims=[...], evidence=<source>, method=lexical|nli|llm)
 → chimera_detect(text=<claim>)
 ```
 

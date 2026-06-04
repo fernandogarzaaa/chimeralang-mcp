@@ -1,0 +1,24 @@
+{
+  "certainty": {
+    "precision": 1.0,
+    "recall": 0.8,
+    "f1": 0.8889,
+    "accuracy": 0.9,
+    "tp": 8,
+    "fp": 0,
+    "fn": 2,
+    "tn": 10,
+    "n": 20
+  },
+  "injection": {
+    "precision": 1.0,
+    "recall": 0.125,
+    "f1": 0.2222,
+    "accuracy": 0.5625,
+    "tp": 1,
+    "fp": 0,
+    "fn": 7,
+    "tn": 8,
+    "n": 16
+  }
+}

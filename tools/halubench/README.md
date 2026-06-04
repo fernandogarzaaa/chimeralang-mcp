@@ -91,3 +91,33 @@ installed, e.g. CI).
 
 A third method, `llm` (Anthropic judge, `[llm]` extra + `ANTHROPIC_API_KEY`),
 is also available; it is non-deterministic and therefore not hash-replayable.
+
+## DetectBench (Phase 5.3, `chimera_detect` calibration)
+
+`chimera_detect` screens phrasing and attack patterns, not evidence entailment,
+so it is benchmarked on its own task-appropriate corpus (`detect_corpus.json`),
+not the verify corpus. Two signals are measured (deterministic, no extra deps):
+
+```bash
+python -m tools.halubench.run_detect            # score + report
+python -m tools.halubench.run_detect --verbose  # per-item predictions
+```
+
+| Signal | precision | recall | F1 |
+|---|---|---|---|
+| certainty (overconfident phrasing) | 1.000 | 0.800 | 0.889 |
+| injection (prompt-injection text) | 1.000 | **0.125** | 0.222 |
+
+### Honest reading
+
+- **Certainty:** perfect precision (never flags hedged statements), recall 0.8 —
+  it catches the marker words in its list but misses synonyms outside it
+  (`absolutely`, `undoubtedly`). It is a transparent substring matcher, not a
+  calibrated classifier.
+- **Injection: precision 1.0 but recall only 0.125** — `chimera_detect` reliably
+  flags the canonical *"ignore all previous instructions"* phrasing but misses
+  most variants (*"override your safety rules"*, *"developer mode"*, etc.). Its
+  prompt-injection screening is **narrow**: trustworthy when it fires, but far
+  from complete coverage. Expanding the `attack_patterns` pack is the natural
+  follow-up. Locked by `tests/test_halubench.py::TestDetectBench` so any future
+  recall lift is a deliberate, visible change.

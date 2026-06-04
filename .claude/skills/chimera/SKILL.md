@@ -59,7 +59,7 @@ Common mistakes that cause tool errors:
 | Trigger | First-choice tool | Notes |
 |---|---|---|
 | Extract claims from text | `chimera_claims` | Returns atomic claims with hedge/abstention tags. |
-| Verify claims against evidence | `chimera_verify` | Lexical token-overlap scoring. |
+| Verify claims against evidence | `chimera_verify` | `method=lexical` (default): token-overlap, fast, no deps. `method=nli`: cross-encoder entailment/contradiction (needs `[semantic]` extra) — use when you need real contradiction detection. `method=llm`: Anthropic judge (needs `[llm]` extra + key), non-deterministic. |
 | Multi-perspective analysis | `chimera_deliberate` | Multiple perspective passes. |
 | Confidence-weighted vote across N answers | `chimera_quantum_vote` | Use when you have multiple candidate responses. |
 | Collapse candidates into one consensus | `chimera_gate` | Lighter than `quantum_vote`. |
@@ -154,7 +154,7 @@ User: "Analyze these 3 competing API designs"
 User: "Is this claim accurate?" + source text
 → chimera_csm
 → chimera_claims(text=<claim_text>)                               # extract atomic claims
-→ chimera_verify(claims=[...], evidence=<source_text>)            # token-overlap scoring
+→ chimera_verify(claims=[...], evidence=<source_text>)            # method=lexical (default) | nli | llm
 → chimera_detect(text=<claim_text>)                               # MCP attack / injection check
 ```
 

@@ -1653,6 +1653,7 @@ def _verify_claims_against_evidence(
     aggregate_matches: list[dict[str, Any]] = []
     aggregate_attack_flags: list[dict[str, Any]] = []
     all_source_ids: set[str] = set()
+    lexical_supported_count = 0  # always tracked, even under semantic methods
 
     for claim in claims:
         claim_text = str(claim.get("text", "")).strip()
@@ -1726,25 +1727,30 @@ def _verify_claims_against_evidence(
         }
 
         # Decide the verdict class (supported / contradicted / insufficient).
-        # Default lexical path uses the Jaccard thresholds. Semantic methods
-        # (nli/llm) classify the claim against evidence and override the class;
-        # lexical scores are still reported for transparency.
+        # The lexical (Jaccard) class is ALWAYS computed — it is reported via
+        # lexical_support_score for transparency even when a semantic method
+        # drives the final verdict.
         best_match_tainted = bool((best_match or {}).get("tainted"))
         # The semantic classifier reads EVERY evidence snippet, so its taint
         # check must consider any attack-flagged evidence for this claim, not
         # just the highest-lexical-overlap match.
         any_evidence_tainted = bool(claim_attack_flags)
+        if contradiction_score >= 0.8:
+            lexical_cls = "contradicted"
+        elif support_score >= 0.55 and not best_match_tainted:
+            lexical_cls = "supported"
+        else:
+            lexical_cls = "insufficient"
+        if lexical_cls == "supported":
+            lexical_supported_count += 1
+
         if method == "lexical":
-            if contradiction_score >= 0.8:
-                cls = "contradicted"
-            elif support_score >= 0.55 and not best_match_tainted:
-                cls = "supported"
-            else:
-                cls = "insufficient"
+            cls = lexical_cls
             taint_for_mark = best_match_tainted
         else:
             sem = semantic.classify(claim_text, evidence_texts, method)
             evaluated["semantic"] = sem
+            evaluated["lexical_verdict"] = f"lexically_{lexical_cls}"
             cls = sem["label"]
             # Security guard: any attack-flagged evidence blocks semantic
             # support, because the classifier considered all snippets — a benign
@@ -1776,6 +1782,10 @@ def _verify_claims_against_evidence(
 
     total = len(verified_claims) + len(unsupported_claims) + len(contradicted_claims)
     verification_score = round(len(verified_claims) / max(total, 1), 4)
+    # lexical_support_score always reflects the Jaccard matcher, independent of
+    # the method that produced the final verdict (identical to verification_score
+    # when method == "lexical").
+    lexical_support_score = round(lexical_supported_count / max(total, 1), 4)
     overall_verdict = (
         f"{prefix}_contradicted"
         if contradicted_claims
@@ -1791,7 +1801,7 @@ def _verify_claims_against_evidence(
         "verified_claims": verified_claims,
         "unsupported_claims": unsupported_claims,
         "contradicted_claims": contradicted_claims,
-        "lexical_support_score": verification_score,
+        "lexical_support_score": lexical_support_score,
         "verification_score": verification_score,
         "evidence_count": len(evidence),
         "supported": overall_verdict == f"{prefix}_supported",
@@ -3856,6 +3866,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                 {
                     "namespace": namespace,
                     "tool_name": name,
+                    "method": method,
                     "evidence_count": len(evidence),
                     "materials_used": verification["materials_used"],
                     "pack_versions": verification["pack_versions"],
@@ -3890,6 +3901,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             _record_trace(namespace, envelope)
             _record_audit(namespace, {
                 "tool_name": name,
+                "method": method,
                 "passed": verification["supported"],
                 "confidence": verification["verification_score"],
                 "claims": len(claims),

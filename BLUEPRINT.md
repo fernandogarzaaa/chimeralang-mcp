@@ -173,7 +173,7 @@ Independent audit (2026-05-07) identified the project's **real moat**: it's the 
 
 ---
 
-## Phase 5 — Verifiable hallucination detection **[5.1–5.2 COMPLETE]**
+## Phase 5 — Verifiable hallucination detection **[5.1–5.3 COMPLETE]**
 
 **Goal:** Give the hallucination pillar a *published number* (like Glyph's −16%) and a real semantic tier, so `chimera_verify` can catch contradictions that lexical overlap misses — without abandoning the deterministic default.
 
@@ -182,7 +182,7 @@ Independent audit (2026-05-07) identified the project's **real moat**: it's the 
 ### Sub-tasks
 - [x] **5.1 — Baseline benchmark (HaluBench).** `tools/halubench/` ships a 30-item hand-labeled corpus (10/10/10 across supported/contradicted/insufficient, 5 domains, no `verification_gold` leakage), a runner that scores every item through the live `chimera_verify` tool, and a regression test (`tests/test_halubench.py`) that locks the numbers. **Baseline (lexical): accuracy 0.633, macro-F1 0.525.** Headline finding: **contradiction recall = 0.000** — lexical overlap catches none of the 10 contradictions because claim and evidence share vocabulary. This is the number 5.2 must beat.
 - [x] **5.2 — Optional semantic tier.** `chimera_verify` gained a `method` param (`lexical` default | `nli` | `llm`). `nli` = `cross-encoder/nli-deberta-v3-xsmall` (optional `[semantic]` extra, lazy import, deterministic); `llm` = Anthropic judge with prompt caching (optional `[llm]` extra, `ANTHROPIC_API_KEY`, non-deterministic, not hash-replayable). Verdicts are method-namespaced (`lexically_*` / `nli_*` / `llm_*`); semantic results carry `model_id` + scores. Core server still imports with only `mcp` (heavy deps load on first semantic call). **Measured on HaluBench: nli lifts accuracy 0.633→0.933, macro-F1 0.525→0.935, and contradiction recall 0.000→1.000.** Regression-guarded by `tests/test_halubench.py::TestHaluBenchNLI` + `tests/test_verify_methods.py` (skip cleanly without the extra).
-- [ ] **5.3 — Calibrate `chimera_detect` (stretch).** Report detect's own precision/recall on the HaluBench corpus; optional grounded-RAG (retrieve→score) path.
+- [x] **5.3 — Calibrate `chimera_detect`.** `tools/halubench/detect_corpus.json` + `run_detect.py` measure detect's two real signals on a task-appropriate corpus (detect screens phrasing/attacks, not entailment). **Certainty: precision 1.000, recall 0.800** (catches listed markers, misses synonyms). **Injection: precision 1.000, recall 0.125** — flags the canonical "ignore all previous instructions" but misses most variants; its prompt-injection screening is narrow (trustworthy when it fires, far from complete). Locked by `tests/test_halubench.py::TestDetectBench`. The optional grounded-RAG (retrieve→score) path remains deferred — it is a genuine new feature, not required by the hybrid goal.
 
 ### Success criteria
 - [x] Published lexical baseline F1, regression-locked
@@ -213,4 +213,4 @@ Independent audit (2026-05-07) identified the project's **real moat**: it's the 
 - `[x]` Complete
 - `[!]` Blocked / pivoting (see notes)
 
-Last updated: 2026-05-07 (Phase 1 spike in progress)
+Last updated: 2026-06-04 (Phase 5 — Verifiable hallucination detection, 5.1–5.3 complete)

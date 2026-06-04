@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from functools import lru_cache
 from typing import Any
 
@@ -155,10 +156,11 @@ def _parse_llm_verdict(text: str) -> tuple[str, str]:
                 return verdict, str(obj.get("rationale", ""))
         except json.JSONDecodeError:
             pass
-    # Defensive fallback if the model didn't return clean JSON.
+    # Defensive fallback if the model didn't return clean JSON. Use whole-word
+    # matching so "unsupported" is not mistaken for "supported".
     low = text.lower()
     for verdict in ("contradicted", "insufficient", "supported"):
-        if verdict in low:
+        if re.search(rf"\b{verdict}\b", low):
             return verdict, text.strip()[:200]
     return "insufficient", text.strip()[:200]
 
