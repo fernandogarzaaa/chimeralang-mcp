@@ -407,3 +407,26 @@ class TestDefectFixes(unittest.TestCase):
         )
         self.assertTrue(result["verdict"].startswith("lexically_"))
         self.assertEqual(result["verified_claims"][0]["text"], "Paris is the capital of France.")
+
+    def test_compress_missing_text_returns_clean_error(self):
+        """Bug: chimera_compress raised KeyError('text') when 'text' was absent."""
+        is_error, payload = self._call_raw(
+            "chimera_compress", {"messages": [{"role": "user", "content": "hi"}]}
+        )
+        self.assertTrue(is_error)
+        self.assertIn("text", payload["error"].lower())
+        # Empty/whitespace text is rejected the same way.
+        is_error, _ = self._call_raw("chimera_compress", {"text": "   "})
+        self.assertTrue(is_error)
+
+    def test_compress_valid_text_still_works(self):
+        result = self._call("chimera_compress", {"text": "The quick brown fox. " * 8})
+        self.assertIn("compressed_text", result)
+
+    def test_score_accepts_plain_string_messages(self):
+        """Bug: chimera_score raised AttributeError when messages were plain strings."""
+        result = self._call(
+            "chimera_score",
+            {"messages": ["deploy the hotfix now", "rolled back the release"]},
+        )
+        self.assertEqual(len(result["scores"]), 2)
