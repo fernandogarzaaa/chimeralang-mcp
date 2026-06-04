@@ -1587,11 +1587,28 @@ def _contradiction_score(claim_text: str, evidence_text: str, overlap_score: flo
     return score
 
 
+def _normalize_claim_input(claim: Any) -> dict[str, Any]:
+    """Coerce a claim into a dict with a "text" field.
+
+    Claims may arrive as plain strings (the simplest caller form, permitted by
+    the chimera_verify schema) or as already-structured dicts from
+    chimera_claims. Strings and text-less dicts are wrapped so downstream
+    scoring can rely on claim.get("text").
+    """
+    if isinstance(claim, dict):
+        if claim.get("text"):
+            return claim
+        text = claim.get("claim") or claim.get("value") or ""
+        return {**claim, "text": str(text)}
+    return {"text": str(claim)}
+
+
 def _verify_claims_against_evidence(
-    claims: list[dict[str, Any]],
+    claims: list[Any],
     evidence: list[Any],
 ) -> dict[str, Any]:
     registry = _get_materials()
+    claims = [_normalize_claim_input(claim) for claim in claims]
     evidence_texts = [_evidence_text(item) for item in evidence]
     evidence_blob = "\n".join(evidence_texts).lower()
     evidence_lower = [text.lower() for text in evidence_texts]
