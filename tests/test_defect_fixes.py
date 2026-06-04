@@ -395,3 +395,15 @@ class TestDefectFixes(unittest.TestCase):
             "semantic" in note_lower or "entailment" in note_lower or "nli" in note_lower,
             f"method_note should disclaim NLI/entailment, got: {result['method_note']}"
         )
+
+    def test_verify_accepts_plain_string_claims(self):
+        """Bug: passing claims as plain strings raised AttributeError ('str' has no .get)."""
+        result = self._call(
+            "chimera_verify",
+            {
+                "claims": ["Paris is the capital of France."],
+                "evidence": ["Paris is the capital and most populous city of France."],
+            },
+        )
+        self.assertTrue(result["verdict"].startswith("lexically_"))
+        self.assertEqual(result["verified_claims"][0]["text"], "Paris is the capital of France.")
