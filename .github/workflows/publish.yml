@@ -13,12 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
-      id-token: write  # OIDC Trusted Publishing — no API key needed
+      id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -30,3 +30,8 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # The workflow runs on every push to main, so content-only commits
+          # (docs, SECURITY.md, etc.) would otherwise re-upload the unchanged
+          # version and fail with "File already exists" from PyPI.
+          skip-existing: true
