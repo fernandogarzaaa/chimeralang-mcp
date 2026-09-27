@@ -20,7 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-dependencies = ["mcp>=1.0.0,<2.0.0"]
+dependencies = ["mcp>=2.0.0"]
 
 [project.optional-dependencies]
 sync = ["datasets>=2.20.0", "huggingface_hub>=0.23.0"]

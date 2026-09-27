@@ -53,7 +53,7 @@ async def _predict(item: dict, method: str, rag_pool: list[str] | None = None) -
     if method != "lexical":
         args["method"] = method
     result = await srv.call_tool("chimera_verify", args)
-    if result.isError:
+    if result.is_error:
         try:
             msg = json.loads(result.content[0].text).get("error", result.content[0].text)
         except Exception:
