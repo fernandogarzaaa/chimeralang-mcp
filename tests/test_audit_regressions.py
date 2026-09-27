@@ -18,7 +18,7 @@ class TestAuditRegressions(unittest.TestCase):
 
     def _call(self, name: str, args: dict):
         result = _run(self.call_tool(name, args))
-        self.assertFalse(result.isError, result.content[0].text)
+        self.assertFalse(result.is_error, result.content[0].text)
         return json.loads(result.content[0].text)
 
     def test_confident_preserves_structured_value(self):

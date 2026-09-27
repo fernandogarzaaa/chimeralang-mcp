@@ -91,7 +91,7 @@ async def _run_step(step: dict) -> tuple[bool, dict]:
     """Run step."""
     result = await srv.call_tool(step["tool"], step["args"])
     payload = json.loads(result.content[0].text)
-    return result.isError, payload
+    return result.is_error, payload
 
 
 # ── runner ───────────────────────────────────────────────────────────────

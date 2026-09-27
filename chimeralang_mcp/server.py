@@ -29,9 +29,16 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "openchimera"))
 
-from mcp.server import Server
+from mcp.server import Server, ServerRequestContext
 from mcp.server.stdio import stdio_server
-from mcp.types import CallToolResult, TextContent, Tool
+from mcp.types import (
+    CallToolRequestParams,
+    CallToolResult,
+    ListToolsResult,
+    PaginatedRequestParams,
+    TextContent,
+    Tool,
+)
 
 from chimera.lexer import Lexer
 from chimera.parser import Parser
@@ -657,7 +664,28 @@ _tbm           = get_token_budget_manager()
 _scorer        = MessageImportanceScorer()
 _quantum       = get_quantum_compression_engine()
 _cost_tracker  = _CostTracker()
-server         = Server("chimeralang-mcp", version=__version__)
+
+
+async def _on_list_tools(
+    ctx: ServerRequestContext, params: PaginatedRequestParams | None
+) -> ListToolsResult:
+    """MCP 2.x tools/list handler. Delegates to list_tools()."""
+    return ListToolsResult(tools=await list_tools())
+
+
+async def _on_call_tool(
+    ctx: ServerRequestContext, params: CallToolRequestParams
+) -> CallToolResult:
+    """MCP 2.x tools/call handler. Delegates to call_tool()."""
+    return await call_tool(params.name, params.arguments or {})
+
+
+server = Server(
+    "chimeralang-mcp",
+    version=__version__,
+    on_list_tools=_on_list_tools,
+    on_call_tool=_on_call_tool,
+)
 _store         = PersistentNamespaceStore()
 _materials_registry: MaterialRegistry | None = None
 
@@ -1485,14 +1513,14 @@ def _ok(data: Any) -> CallToolResult:
             rendered = json.dumps(recompressed, indent=2)
     return CallToolResult(
         content=[TextContent(type="text", text=rendered)],
-        isError=False,
+        is_error=False,
     )
 
 def _err(msg: str) -> CallToolResult:
     """Err."""
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps({"error": msg}))],
-        isError=True,
+        is_error=True,
     )
 
 
@@ -2084,7 +2112,6 @@ def _run(source: str) -> dict[str, Any]:
 
 # ── tool registry ─────────────────────────────────────────────────────────
 
-@server.list_tools()
 async def list_tools() -> list[Tool]:
     """List tools."""
     return [
@@ -3303,7 +3330,6 @@ async def list_tools() -> list[Tool]:
 
 # ── tool handlers ─────────────────────────────────────────────────────────
 
-@server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
     """Call tool."""
     _ns_for_advisory = (
@@ -3325,7 +3351,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     return _err(f"replay program rejected: {e}")
                 inner_result = await call_tool(body["tool"], body["args"])
                 inner_payload = json.loads(inner_result.content[0].text)
-                if inner_result.isError:
+                if inner_result.is_error:
                     return _err(
                         f"replay re-execution of {body['tool']!r} failed: {inner_payload}"
                     )
@@ -3802,7 +3828,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     return _err(f"replay program rejected: {e}")
                 inner_result = await call_tool(body["tool"], body["args"])
                 inner_payload = json.loads(inner_result.content[0].text)
-                if inner_result.isError:
+                if inner_result.is_error:
                     return _err(
                         f"replay re-execution of {body['tool']!r} failed: {inner_payload}"
                     )
@@ -5607,10 +5633,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
                     results.append({
                         "index":   i,
                         "tool":    tool_name,
-                        "success": not r.isError,
+                        "success": not r.is_error,
                         "result":  json.loads(raw),
                     })
-                    if stop_on_error and r.isError:
+                    if stop_on_error and r.is_error:
                         break
                 except Exception as exc:
                     results.append({

@@ -21,7 +21,7 @@ CONTRA = {
 
 def _call(args: dict):
     result = asyncio.run(srv.call_tool("chimera_verify", args))
-    return result.isError, json.loads(result.content[0].text)
+    return result.is_error, json.loads(result.content[0].text)
 
 
 class TestVerifyMethods(unittest.TestCase):

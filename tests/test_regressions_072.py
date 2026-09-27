@@ -12,7 +12,7 @@ from chimeralang_mcp.persistence import PersistentNamespaceStore
 
 def _call(tool: str, args: dict) -> tuple[bool, dict]:
     result = asyncio.run(srv.call_tool(tool, args))
-    return result.isError, json.loads(result.content[0].text)
+    return result.is_error, json.loads(result.content[0].text)
 
 
 class TestCostTrackUnboundLocal(unittest.TestCase):

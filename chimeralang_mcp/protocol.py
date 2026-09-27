@@ -197,7 +197,7 @@ async def verify_and_unpack(handoff: Handoff, *, call_tool) -> VerificationResul
     # header into the replay-dispatch path of chimera_run.
     rerun = await call_tool("chimera_run", {"source": handoff.replay_envelope})
     rerun_payload = json.loads(rerun.content[0].text)
-    if rerun.isError:
+    if rerun.is_error:
         return VerificationResult(
             accepted=False,
             failure_reason=f"replay re-execution errored: {rerun_payload}",

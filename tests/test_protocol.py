@@ -38,7 +38,7 @@ GATE_ARGS = {
 
 def _call(tool: str, args: dict) -> tuple[bool, dict]:
     result = asyncio.run(srv.call_tool(tool, args))
-    return result.isError, json.loads(result.content[0].text)
+    return result.is_error, json.loads(result.content[0].text)
 
 
 def _make_handoff() -> Handoff:
