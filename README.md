@@ -2,7 +2,7 @@
 
 **Give Claude typed confidence, hallucination detection, and constraint enforcement as native MCP tools.**
 
-ChimeraLang is a programming language built for AI cognition. This MCP server exposes its runtime as **44 tools** Claude can call during any conversation. No Anthropic permission needed, works today with Claude Desktop and Claude Code.
+ChimeraLang is a programming language built for AI cognition. This MCP server exposes its runtime as **51 tools** Claude can call during any conversation. No Anthropic permission needed, works today with Claude Desktop and Claude Code.
 
 ---
 
@@ -61,7 +61,7 @@ Or with a pip-installed version:
 }
 ```
 
-Restart Claude Desktop. 44 ChimeraLang tools are now available.
+Restart Claude Desktop. 51 ChimeraLang tools are now available.
 
 ---
 
@@ -107,6 +107,13 @@ Most stateful tools accept an optional `namespace` and persist data to `~/.chime
 | `chimera_meta_learn` | Record adaptation events and retrieve meta-learning stats |
 | `chimera_transfer_learn` | Map concepts across source and target domains |
 
+### Chimera Glyph
+
+| Tool | What it does |
+|---|---|
+| `chimera_glyph_directive` | Emit a system instruction forcing the agent to write only in Chimera Glyph, a compact AI-only pidgin for token efficiency |
+| `chimera_glyph_translate` | Translate Chimera Glyph text back into readable English, reconstructing meaning rather than surface form |
+
 ### Knowledge and Memory
 
 | Tool | What it does |
@@ -145,6 +152,11 @@ The token-efficiency stack now defaults to a deterministic, quantum-inspired com
 | `chimera_mode` | Recommend a task-relevant subset of the tool inventory |
 | `chimera_batch` | Execute multiple Chimera tools in a single MCP call |
 | `chimera_summarize` | LLM-free extractive summarizer for long documents |
+| `chimera_cache_mark` | Build Anthropic prompt-cache markers for stable blocks, with `cache_control: ephemeral` on cacheable blocks |
+| `chimera_log_compress` | Compress build, test, and install logs while preserving every error, warning, and traceback verbatim |
+| `chimera_overhead_audit` | Estimate per-turn baseline cost to surface the "ghost tokens" paid on every turn |
+| `chimera_dedup_lookup` | Inspect or query the per-namespace tool-call dedup cache |
+| `chimera_session_report` | End-of-session summary: total tokens saved, dedup cache hits, top compressed responses, lock state |
 
 ### Meta and Audit
 
@@ -287,6 +299,36 @@ end
 ---
 
 ## Changelog
+
+### 0.8.3
+- Bump version to 0.8.3 so PyPI matches the MCP 2.x tree
+
+### 0.8.2
+- Migrate the MCP server from 1.x decorators to MCP 2.x handler registration
+
+### 0.8.1
+- Graceful input handling for `chimera_compress` and `chimera_score`
+
+### 0.8.0
+- Verifiable hallucination detection: HaluBench plus semantic tier plus detect calibration (Phase 5)
+
+### 0.7.6
+- `chimera_verify` accepts plain-string claims
+
+### 0.7.5
+- Tokenizer-aware Glyph, replay envelope, ChimeraBench, and cross-agent protocol (Phases 1-4)
+
+### 0.7.2
+- Fix known issues from the 0.7.1 skill
+
+### 0.7.1
+- Correct decoder bugs in Chimera Glyph
+
+### 0.7.0
+- Chimera Glyph AI-only language plus `chimera_glyph_directive` and `chimera_glyph_translate` tools
+
+### 0.6.1
+- Session-wide token tooling: `chimera_cache_mark`, `chimera_log_compress`, `chimera_dedup_lookup`, `chimera_overhead_audit`, and `chimera_session_report`
 
 ### 0.6.0
 - Add a deterministic quantum-inspired token compression engine with salience amplitude, entanglement boosts, redundancy interference, and budgeted measurement
