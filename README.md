@@ -14,9 +14,19 @@ pip install chimeralang-mcp
 uvx chimeralang-mcp
 ```
 
+On Debian/Ubuntu, installing into the system Python is blocked
+(`externally-managed-environment`). Use a virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install chimeralang-mcp
+```
+
 ### Development quick checks
 
 ```bash
+python -m pip install pytest   # not included in the install dependencies
 pytest -q
 python -m pip check
 ```
@@ -111,7 +121,7 @@ Most stateful tools accept an optional `namespace` and persist data to `~/.chime
 
 | Tool | What it does |
 |---|---|
-| `chimera_glyph_directive` | Emit a system instruction forcing the agent to write only in Chimera Glyph, a compact AI-only pidgin for token efficiency |
+| `chimera_glyph_directive` | Emit a system instruction forcing the agent to write only in Chimera Glyph, a deterministic AI-to-AI notation (measured ~16% *longer* in BPE tokens than plain English; its value is semantic determinism, not token savings) |
 | `chimera_glyph_translate` | Translate Chimera Glyph text back into readable English, reconstructing meaning rather than surface form |
 
 ### Knowledge and Memory
