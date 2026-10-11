@@ -2348,7 +2348,10 @@ async def list_tools() -> list[Tool]:
                     },
                     "namespace": {"type": "string", "default": "default"},
                 },
-                "required": ["evidence"],
+                # Nothing is strictly required: claims fall back to text/envelope
+                # extraction, and evidence falls back to corpus retrieval (or
+                # empty evidence, which yields lexically_insufficient verdicts).
+                "required": [],
             },
         ),
         Tool(
@@ -2820,7 +2823,9 @@ async def list_tools() -> list[Tool]:
                         ),
                     },
                 },
-                "required": ["prompt", "perspectives"],
+                # The implementation reads prompt/perspectives with .get()
+                # defaults, so neither is truly required.
+                "required": [],
             },
         ),
         Tool(
@@ -3330,7 +3335,70 @@ async def list_tools() -> list[Tool]:
 
 # ── tool handlers ─────────────────────────────────────────────────────────
 
+_TOOL_ARG_SPECS: dict[str, dict[str, Any]] | None = None
+
+
+async def _tool_arg_specs() -> dict[str, dict[str, Any]]:
+    """Lazily build name -> {required, properties} from the tool schemas.
+
+    The schemas in list_tools() are the single source of truth for what each
+    tool accepts, so argument validation automatically covers all tools.
+    """
+    global _TOOL_ARG_SPECS
+    if _TOOL_ARG_SPECS is None:
+        specs: dict[str, dict[str, Any]] = {}
+        for tool in await list_tools():
+            schema = tool.input_schema or {}
+            props = schema.get("properties") or {}
+            specs[tool.name] = {
+                "required": list(schema.get("required") or []),
+                "properties": set(props),
+            }
+        _TOOL_ARG_SPECS = specs
+    return _TOOL_ARG_SPECS
+
+
 async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
+    """Validate arguments against the tool schema, then dispatch.
+
+    Missing required arguments fail fast with an error that names the expected
+    arguments. Unexpected arguments are not silently swallowed: the call still
+    runs, but the result carries a warning naming what was ignored.
+    """
+    unknown: list[str] = []
+    expected: list[str] = []
+    if isinstance(arguments, dict):
+        spec = (await _tool_arg_specs()).get(name)
+        if spec is not None:
+            missing = [arg for arg in spec["required"] if arg not in arguments]
+            if missing:
+                return _err(
+                    f"Missing required argument(s) for tool {name!r}: {missing}. "
+                    f"Expected arguments: {sorted(spec['properties'])}"
+                )
+            expected = sorted(spec["properties"])
+            unknown = sorted(arg for arg in arguments if arg not in spec["properties"])
+    result = await _dispatch_tool(name, arguments if isinstance(arguments, dict) else {})
+    if unknown and not result.is_error:
+        try:
+            payload = json.loads(result.content[0].text) if result.content else None
+        except Exception:
+            payload = None
+        if isinstance(payload, dict):
+            note = (
+                f"Ignored unexpected argument(s) for tool {name!r}: {unknown}. "
+                f"Expected arguments: {expected}"
+            )
+            existing = payload.get("warnings")
+            if isinstance(existing, list):
+                existing.append(note)
+            else:
+                payload["warnings"] = [note]
+            return _ok(payload)
+    return result
+
+
+async def _dispatch_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
     """Call tool."""
     _ns_for_advisory = (
         _state_namespace(arguments) if isinstance(arguments, dict) else "default"
