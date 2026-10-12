@@ -5,6 +5,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # huggingface-hub (optional `sync`/`semantic` extras) is capped by
+      # transformers/sentence-transformers; every Dependabot bump of it is
+      # unresolvable (dependency_file_not_resolvable) and fails the job.
+      # It moves when those packages move.
+      - dependency-name: huggingface-hub
 
   - package-ecosystem: github-actions
     directory: "/"
