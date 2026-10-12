@@ -846,8 +846,29 @@ class _TransferLearner:
                 "domain_pairs": [{"source": s, "target": t} for s, t in domains]}
 
 
+def _clamp_num(value: Any, lo: float, hi: float, default: float) -> float:
+    """Coerce ``value`` to a finite float in [lo, hi]; non-numeric or NaN/inf falls back to ``default``."""
+    import math as _math
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        v = float(default)
+    if not _math.isfinite(v):
+        v = float(default)
+    return max(lo, min(hi, v))
+
+
 class _EvolutionEngine:
-    """Fitness-ranked candidate selector via generational selection + mutation."""
+    """Fitness-ranked candidate selector via generational selection + mutation.
+
+    Inputs are clamped so one call cannot exhaust memory: before these limits, a
+    survival_ratio of 1.0 doubled the population every generation and
+    ``generations`` was unbounded.
+    """
+    MAX_GENERATIONS = 100
+    MAX_CANDIDATES = 500
+    MAX_POPULATION = 1000
+
     def __init__(self) -> None:
         """Initialize the instance."""
         self._last_run: dict[str, Any] = {}
@@ -856,24 +877,34 @@ class _EvolutionEngine:
             mutation_rate: float, survival_ratio: float) -> dict[str, Any]:
         """Run."""
         import random as _random
-        pop = [dict(c) for c in candidates]
+        gens = int(_clamp_num(generations, 1, self.MAX_GENERATIONS, 5))
+        rate = _clamp_num(mutation_rate, 0.0, 1.0, 0.1)
+        ratio = _clamp_num(survival_ratio, 0.01, 1.0, 0.5)
+        limits = {"generations": gens, "mutation_rate": rate, "survival_ratio": ratio,
+                  "max_population": self.MAX_POPULATION}
+        truncated = len(candidates) > self.MAX_CANDIDATES
+        pop = [dict(c) for c in candidates[: self.MAX_CANDIDATES]]
         history: list[dict[str, Any]] = []
-        for gen in range(max(1, generations)):
+        for gen in range(gens):
             pop.sort(key=lambda c: c["fitness_score"], reverse=True)
-            keep = max(1, int(len(pop) * survival_ratio))
+            keep = max(1, int(len(pop) * ratio))
             survivors = pop[:keep]
             mutated   = []
             for c in survivors:
                 m = dict(c)
                 m["fitness_score"] = round(
-                    max(0.0, min(1.0, m["fitness_score"] + _random.uniform(-mutation_rate, mutation_rate))), 4)
+                    max(0.0, min(1.0, m["fitness_score"] + _random.uniform(-rate, rate))), 4)
                 mutated.append(m)
             pop = survivors + mutated
+            if len(pop) > self.MAX_POPULATION:
+                pop.sort(key=lambda c: c["fitness_score"], reverse=True)
+                pop = pop[: self.MAX_POPULATION]
             history.append({"generation": gen + 1, "population": len(pop),
-                             "best_fitness": round(pop[0]["fitness_score"], 4)})
+                             "best_fitness": round(max(c["fitness_score"] for c in pop), 4)})
         pop.sort(key=lambda c: c["fitness_score"], reverse=True)
         result = {"best": pop[0], "ranked": pop, "generations": history,
-                  "survivors": len(pop), "initial_count": len(candidates)}
+                  "survivors": len(pop), "initial_count": len(candidates),
+                  "effective_params": limits, "candidates_truncated": truncated}
         self._last_run = result
         return result
 
@@ -2998,9 +3029,9 @@ async def list_tools() -> list[Tool]:
                             "required": ["id", "value", "fitness_score"],
                         },
                     },
-                    "generations":    {"type": "integer", "default": 5, "description": "Number of evolution generations"},
+                    "generations":    {"type": "integer", "default": 5, "minimum": 1, "maximum": 100, "description": "Number of evolution generations (clamped to 1-100)"},
                     "mutation_rate":  {"type": "number",  "default": 0.1, "description": "Fitness noise ±range per generation"},
-                    "survival_ratio": {"type": "number",  "default": 0.5, "description": "Fraction kept each generation"},
+                    "survival_ratio": {"type": "number",  "default": 0.5, "minimum": 0.01, "maximum": 1, "description": "Fraction kept each generation (clamped to 0.01-1; population capped at 1000)"},
                 },
             },
         ),
@@ -5268,11 +5299,16 @@ async def _dispatch_tool(name: str, arguments: dict[str, Any]) -> CallToolResult
                 candidates = arguments.get("candidates")
                 if not candidates:
                     return _err("chimera_evolve run requires 'candidates' list [{id, value, fitness_score}]")
+                if not isinstance(candidates, list) or not all(
+                    isinstance(c, dict) and isinstance(c.get("fitness_score"), (int, float)) for c in candidates
+                ):
+                    return _err("chimera_evolve run requires 'candidates' list [{id, value, fitness_score}]")
+                # run() clamps these (generations<=100, survival_ratio in [0.01,1], population<=1000)
                 return _ok(ev.run(
                     candidates=candidates,
-                    generations=int(arguments.get("generations", 5)),
-                    mutation_rate=float(arguments.get("mutation_rate", 0.1)),
-                    survival_ratio=float(arguments.get("survival_ratio", 0.5)),
+                    generations=arguments.get("generations", 5),
+                    mutation_rate=arguments.get("mutation_rate", 0.1),
+                    survival_ratio=arguments.get("survival_ratio", 0.5),
                 ))
             return _ok(ev.info())
 

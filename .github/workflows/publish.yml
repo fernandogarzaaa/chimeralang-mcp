@@ -1,11 +1,11 @@
 name: Publish to PyPI
 
+# Publishes only for version tags (v*) or an explicit manual dispatch.
+# Pushes to main no longer publish.
 on:
   push:
     tags:
       - "v*"
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
@@ -31,7 +31,6 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          # The workflow runs on every push to main, so content-only commits
-          # (docs, SECURITY.md, etc.) would otherwise re-upload the unchanged
-          # version and fail with "File already exists" from PyPI.
+          # Re-running a tag (or a manual dispatch on an already-released
+          # version) must not fail with "File already exists" from PyPI.
           skip-existing: true
