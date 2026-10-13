@@ -310,6 +310,10 @@ end
 
 ## Changelog
 
+### 0.8.4
+- Fix `chimera_fracture`, `chimera_budget`, `chimera_cost_estimate` and `chimera_csm` crashing with `AttributeError: 'str' object has no attribute 'get'` when `messages` contains plain strings; strings are now treated as user messages (same as `chimera_score`)
+- Tool schemas for `messages` now declare `items: {role, content}`
+
 ### 0.8.3
 - Bump version to 0.8.3 so PyPI matches the MCP 2.x tree
 

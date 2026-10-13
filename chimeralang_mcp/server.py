@@ -1776,6 +1776,21 @@ def _normalize_claim_input(claim: Any) -> dict[str, Any]:
     return {"text": str(claim)}
 
 
+# JSON Schema for one conversation message. Plain strings are also accepted at
+# runtime (see _coerce_messages) but the advertised shape is {role, content}.
+_MESSAGE_ITEM_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "role": {"type": "string", "description": "user | assistant | system"},
+        "content": {
+            "description": "Message text, or a list of content blocks ({type: text, text}).",
+            "anyOf": [{"type": "string"}, {"type": "array"}],
+        },
+    },
+    "required": ["content"],
+}
+
+
 def _coerce_messages(messages: Any) -> list[dict[str, Any]]:
     """Coerce a messages argument into a list of dicts.
 
@@ -2449,6 +2464,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "messages": {
                         "type": "array",
+                        "items": _MESSAGE_ITEM_SCHEMA,
                         "description": "Conversation history [{role, content}]. "
                                        "Compressed to fit token_budget before processing.",
                     },
@@ -2593,6 +2609,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "messages": {
                         "type": "array",
+                        "items": _MESSAGE_ITEM_SCHEMA,
                         "description": "Current conversation messages [{role, content}]",
                     },
                     "max_tokens": {
@@ -2624,6 +2641,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "messages": {
                         "type": "array",
+                        "items": _MESSAGE_ITEM_SCHEMA,
                         "description": "Messages to score [{role, content}]",
                     },
                     "focus": {
@@ -2655,6 +2673,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "messages": {
                         "type": "array",
+                        "items": _MESSAGE_ITEM_SCHEMA,
                         "description": "Message list [{role, content}] to estimate. Use instead of text.",
                     },
                     "model": {
@@ -2733,6 +2752,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "messages": {
                         "type": "array",
+                        "items": _MESSAGE_ITEM_SCHEMA,
                         "description": "Optional conversation history [{role, content}] for full context token count.",
                     },
                     "model": {
@@ -4534,7 +4554,7 @@ async def _dispatch_tool(name: str, arguments: dict[str, Any]) -> CallToolResult
         elif name == "chimera_fracture":
             import re as _re
 
-            messages = arguments.get("messages", [])
+            messages = _coerce_messages(arguments.get("messages", []))
             documents = arguments.get("documents", [])
             token_budget = int(arguments.get("token_budget", 1500))
             allow_lossy = bool(arguments.get("allow_lossy", False))
@@ -4965,7 +4985,7 @@ async def _dispatch_tool(name: str, arguments: dict[str, Any]) -> CallToolResult
 
         # ── chimera_budget ────────────────────────────────────────────────
         elif name == "chimera_budget":
-            messages = arguments.get("messages", [])
+            messages = _coerce_messages(arguments.get("messages", []))
             max_tokens = int(arguments.get("max_tokens", 200000))
             reserve = int(arguments.get("reserve_tokens", 10000))
             used = _tbm.count_messages(messages)
@@ -5382,7 +5402,7 @@ async def _dispatch_tool(name: str, arguments: dict[str, Any]) -> CallToolResult
             model         = arguments.get("model", _DEFAULT_MODEL)
             output_tokens = int(arguments.get("output_tokens", 0))
             text          = arguments.get("text")
-            messages      = arguments.get("messages")
+            messages      = _coerce_messages(arguments.get("messages"))
 
             if text:
                 input_tokens = _tbm.count_tokens(str(text))
@@ -5560,7 +5580,7 @@ async def _dispatch_tool(name: str, arguments: dict[str, Any]) -> CallToolResult
             import re as _re
 
             prompt = str(arguments["prompt"])
-            messages = arguments.get("messages", [])
+            messages = _coerce_messages(arguments.get("messages", []))
             model = arguments.get("model", _DEFAULT_MODEL)
             task_complexity = arguments.get("task_complexity", "auto")
             algorithm = str(arguments.get("algorithm", "quantum")).lower()
